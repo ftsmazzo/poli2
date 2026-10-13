@@ -42,7 +42,8 @@ describe('migration 006: anexos antigos entram na fila', () => {
       );
 
       expect(await migrate(db, dir)).toEqual([]);
-      expect(await migrate(db)).toEqual(['006_fila_midia_anexos_antigos.sql']);
+      // Roda a 006 (e as seguintes, que existirem): o que importa é a 006 ter enfileirado os anexos.
+      expect((await migrate(db))[0]).toBe('006_fila_midia_anexos_antigos.sql');
 
       const m = await db.query<{ wa: string; nome_arquivo: string | null; mime: string | null; estado: string }>(
         `select ms.wa_message_id as wa, m.nome_arquivo, m.mime, m.estado

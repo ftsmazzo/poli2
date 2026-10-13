@@ -4,6 +4,7 @@ import { loadConfig } from './config';
 import { comLockTentativa, criarPool, migrarComLock } from './db';
 import { importarHistoricoPendente } from './evolution/historico';
 import { sincronizarInstancias } from './evolution/sync';
+import { extrairItensPendentes } from './extrair/persistir';
 import { LIMITES_PADRAO, processarMidiasPendentes } from './midia/processar';
 import { webhookRouter } from './webhooks';
 
@@ -111,7 +112,35 @@ async function processarMidias(): Promise<void> {
   }
 }
 
+const LOCK_EXTRACAO = 8421004;
+const INTERVALO_EXTRACAO_MS = 15_000;
+const LOTE_EXTRACAO = 500;
+
+// Extrai links, contatos, endereços e arquivos das mensagens novas. Com muita coisa atrasada
+// (uma exportação grande, por exemplo), continua em lotes até esvaziar a fila.
+async function extrairItens(): Promise<void> {
+  if (!pool) return;
+  try {
+    await comLockTentativa(pool, LOCK_EXTRACAO, async (db) => {
+      let mensagens = 0;
+      let itens = 0;
+      for (let i = 0; i < 40; i++) {
+        const r = await extrairItensPendentes(db, LOTE_EXTRACAO);
+        mensagens += r.mensagens;
+        itens += r.itens;
+        if (r.mensagens < LOTE_EXTRACAO) break;
+      }
+      if (mensagens) console.log(`extração: ${mensagens} mensagem(ns) lida(s); ${itens} item(ns) encontrado(s)`);
+    });
+  } catch (err) {
+    console.error('extração de itens falhou:', err instanceof Error ? err.message : err);
+  }
+}
+
 function iniciarSincronizacao(): void {
+  // A extração só depende do banco, não da Evolution.
+  void extrairItens();
+  setInterval(() => void extrairItens(), INTERVALO_EXTRACAO_MS);
   if (!cfg.evolutionUrl || !cfg.evolutionApiKey || !cfg.webhookToken) {
     console.warn('Sincronização com a Evolution desligada: faltam EVOLUTION_URL, EVOLUTION_API_KEY ou EVOLUTION_WEBHOOK_TOKEN.');
     return;
