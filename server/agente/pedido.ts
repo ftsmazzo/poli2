@@ -45,14 +45,20 @@ const CHAMADA_POR_NOME = /^\s*@?poli\s?2\b[\s,:!.\-]*/i;
 
 // A Poli só responde quando é chamada: marcação do número dela, resposta a uma mensagem dela,
 // ou frase começando por "Poli2". O nome "Poli" sozinho é da versão 1, que continua no grupo.
-export function ativaPoli(msg: MensagemNormalizada, jidProprio: string | null): { ativa: boolean; consulta: string } {
+export function ativaPoli(
+  msg: MensagemNormalizada,
+  jidProprio: string | null,
+  lidProprio: string | null = null,
+): { ativa: boolean; consulta: string } {
   const texto = msg.texto ?? '';
   const proprio = numeroDe(jidProprio);
   const chave = proprio ? chaveNumero(proprio) : null;
+  // O WhatsApp pode marcar a Poli pelo telefone ou pelo LID (id interno): vale qualquer um dos dois.
+  const eu = (digitos: string) => digitos !== '' && ((lidProprio !== null && digitos === lidProprio) || (chave !== null && chaveNumero(digitos) === chave));
 
-  const marcou = chave !== null && msg.mencionados.some((j) => chaveNumero(numeroDe(j)) === chave);
-  const marcouNoTexto = chave !== null && [...texto.matchAll(/@(\d{8,15})/g)].some((m) => chaveNumero(m[1]) === chave);
-  const respondeuPoli = chave !== null && msg.citadaAutor !== null && chaveNumero(numeroDe(msg.citadaAutor)) === chave;
+  const marcou = msg.mencionados.some((j) => eu(numeroDe(j)));
+  const marcouNoTexto = [...texto.matchAll(/@(\d{8,15})/g)].some((m) => eu(m[1]));
+  const respondeuPoli = msg.citadaAutor !== null && eu(numeroDe(msg.citadaAutor));
   const chamouPorNome = CHAMADA_POR_NOME.test(texto);
 
   const consulta = texto
@@ -65,9 +71,10 @@ export function ativaPoli(msg: MensagemNormalizada, jidProprio: string | null): 
 
 // O autor pode vir como número ou como LID (identificador interno do WhatsApp); o número real, quando
 // existe, vem em outro campo. Vale qualquer um dos dois.
-export function ehComandante(msg: MensagemNormalizada, comandantes: string[]): boolean {
+export function ehComandante(msg: MensagemNormalizada, comandantes: string[], telefonesConhecidos: string[] = []): boolean {
   const permitidos = new Set(comandantes.map(chaveNumero));
-  return [msg.autorJid, msg.autorAlt].some((j) => {
+  // "telefonesConhecidos": telefones que a Poli já ligou ao LID do autor (tabela lids).
+  return [msg.autorJid, msg.autorAlt, ...telefonesConhecidos].some((j) => {
     const n = numeroDe(j);
     return n !== '' && permitidos.has(chaveNumero(n));
   });
@@ -82,12 +89,12 @@ export async function avaliarPedido(
   if (msg.fromMe || msg.tipo !== 'texto' || !msg.texto) return { tipo: 'ignorar' };
 
   const inst = await db.query(
-    'select workspace_id, jid_proprio from instancias_wa where evolution_instance = $1 and ativa',
+    'select workspace_id, jid_proprio, lid_proprio from instancias_wa where evolution_instance = $1 and ativa',
     [instancia],
   );
   if (inst.rows.length === 0) return { tipo: 'ignorar' };
 
-  const chamada = ativaPoli(msg, inst.rows[0].jid_proprio);
+  const chamada = ativaPoli(msg, inst.rows[0].jid_proprio, inst.rows[0].lid_proprio);
   if (!chamada.ativa) {
     const tipos = msg.mencionados.map((j) => dominio(j)).sort().join(',') || 'nenhum';
     return {
@@ -97,7 +104,14 @@ export async function avaliarPedido(
         `@número no texto: ${/@\d{8,15}/.test(msg.texto) ? 'sim' : 'não'}; resposta a mensagem: ${msg.citadaAutor ? `sim (${dominio(msg.citadaAutor)})` : 'não'})`,
     };
   }
-  if (!ehComandante(msg, comandantes)) {
+  // Autor que chega como LID: procura o telefone que a Poli já aprendeu para esse LID.
+  const lids = [msg.autorJid, msg.autorAlt].filter((j): j is string => !!j && j.endsWith('@lid')).map(numeroDe);
+  const conhecidos = lids.length
+    ? (await db.query('select telefone from lids where workspace_id = $1 and lid = any($2)', [inst.rows[0].workspace_id, lids])).rows.map(
+        (r) => r.telefone as string,
+      )
+    : [];
+  if (!ehComandante(msg, comandantes, conhecidos)) {
     return { tipo: 'nao_autorizado', detalhe: `autor: ${dominio(msg.autorJid)}; alternativo: ${dominio(msg.autorAlt)}` };
   }
 

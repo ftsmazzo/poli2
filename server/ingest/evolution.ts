@@ -197,6 +197,20 @@ export async function gravarMensagem(
     pessoaId = pessoa.rows[0].id as number;
   }
 
+  // O WhatsApp pode identificar o autor por LID; quando a mensagem traz também o telefone, guarda o par.
+  if (msg.autorJid?.endsWith('@lid') && msg.autorAlt && !msg.autorAlt.endsWith('@lid')) {
+    const digitos = (j: string) => j.split('@')[0].split(':')[0].replace(/\D/g, '');
+    const lid = digitos(msg.autorJid);
+    const telefone = digitos(msg.autorAlt);
+    if (lid && telefone) {
+      await db.query(
+        `insert into lids (workspace_id, lid, telefone) values ($1, $2, $3)
+         on conflict (workspace_id, lid) do update set telefone = excluded.telefone, atualizado_em = now()`,
+        [workspaceId, lid, telefone],
+      );
+    }
+  }
+
   const inserida = await db.query(
     `insert into mensagens
        (workspace_id, grupo_id, wa_message_id, autor_pessoa_id, autor_jid, enviada_em, tipo, texto, citada_wa_id, bruto)

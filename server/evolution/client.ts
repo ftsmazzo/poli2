@@ -110,6 +110,22 @@ export async function buscarMensagens(
   return { registros, paginas };
 }
 
+// Participantes de todos os grupos. Conforme a versão da Evolution, cada um traz LID, telefone ou os dois.
+export async function listarParticipantes(cfg: EvolutionCfg, instancia: string, f: Fetcher = fetch): Promise<any[]> {
+  const dados = await chamar(cfg, f, `/group/fetchAllGroups/${encodeURIComponent(instancia)}?getParticipants=true`, {}, 60_000);
+  const grupos: any[] = Array.isArray(dados) ? dados : [];
+  return grupos.flatMap((g) => (Array.isArray(g?.participants) ? g.participants : []));
+}
+
+// Pergunta à Evolution como o WhatsApp conhece um número (algumas versões devolvem o LID).
+export async function consultarNumeros(cfg: EvolutionCfg, instancia: string, numeros: string[], f: Fetcher = fetch): Promise<any[]> {
+  const r = await chamar(cfg, f, `/chat/whatsappNumbers/${encodeURIComponent(instancia)}`, {
+    method: 'POST',
+    body: JSON.stringify({ numbers: numeros }),
+  });
+  return Array.isArray(r) ? r : [];
+}
+
 // Envia uma mensagem de texto para um grupo (ou pessoa).
 export async function enviarTexto(
   cfg: EvolutionCfg,

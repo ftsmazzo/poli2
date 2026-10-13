@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { loadConfig } from './config';
 import { comLockTentativa, criarPool, migrarComLock } from './db';
 import { importarHistoricoPendente } from './evolution/historico';
+import { descobrirIdentificadores } from './evolution/lids';
 import { sincronizarInstancias } from './evolution/sync';
 import { criarChatOpenRouter } from './agente/llm';
 import { avaliarPedido } from './agente/pedido';
@@ -90,6 +91,7 @@ async function iniciarBanco(): Promise<void> {
   iniciarSincronizacao();
 }
 
+const ultimoResumoIdentificadores = new Map<string, string>();
 const LOCK_SINCRONIZACAO = 8421002;
 const INTERVALO_SINCRONIZACAO_MS = 5 * 60_000;
 
@@ -120,6 +122,20 @@ async function sincronizarEvolution(): Promise<void> {
           }
         } catch (err) {
           console.error(`histórico ${nome} falhou:`, err instanceof Error ? err.message : err);
+        }
+
+        // Liga LID <-> telefone e descobre o LID da própria Poli. Só registra quando o resultado muda.
+        try {
+          const i = await descobrirIdentificadores(db, evo, nome);
+          const resumo =
+            `participantes ${i.participantes}; com LID ${i.comLid}; com telefone ${i.comTelefone}; pares aprendidos ${i.pares}; ` +
+            `campos [${i.campos.join(',')}]; LID próprio: ${i.lidProprio ? `encontrado (${i.via})` : 'NÃO encontrado'}`;
+          if (ultimoResumoIdentificadores.get(nome) !== resumo) {
+            ultimoResumoIdentificadores.set(nome, resumo);
+            console.log(`identificadores ${nome}: ${resumo}`);
+          }
+        } catch (err) {
+          console.error(`identificadores ${nome} falhou:`, err instanceof Error ? err.message : err);
         }
       }
     });
