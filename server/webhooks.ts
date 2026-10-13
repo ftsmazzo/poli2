@@ -48,6 +48,10 @@ export function webhookRouter(getDb: () => Db | undefined, token: string | undef
         else if (r === 'duplicada') resumo.duplicadas++;
         else resumo.instancia_desconhecida++;
       }
+      // Só contagens: nunca o conteúdo da conversa. Deixa rastro de que as mensagens estão chegando.
+      if (resumo.gravadas || resumo.instancia_desconhecida) {
+        console.log(`webhook ${req.params.instancia}: ${JSON.stringify(resumo)}`);
+      }
       res.json(resumo);
     } catch (err) {
       // Nunca loga o corpo: tem conversa e dados pessoais.
