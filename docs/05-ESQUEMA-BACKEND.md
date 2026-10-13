@@ -47,7 +47,7 @@
 | `turnos` | id, workspace_id, pessoa_id, grupo_id, pergunta, tools (jsonb), fontes (jsonb), resposta, modelo, latencia_ms, criado_em | Log de cada pergunta, para a tela de Diagnóstico e auditoria |
 | `eventos_saude` | id, workspace_id, tipo (instancia, fonte), alvo, estado (caiu, voltou), detalhe, criado_em | Alimenta a faixa vermelha e o aviso ao admin |
 
-Índices a acrescentar na `002`: vetor HNSW em `janelas.embedding`, `mensagens (workspace_id, enviada_em)`, `midias (workspace_id, sha256)` único e `mensagens_saida (estado)`.
+Índices a acrescentar na `002`: vetor HNSW em `janelas.embedding`, `mensagens (workspace_id, enviada_em)`, `midias (workspace_id, sha256)` (não único: o mesmo arquivo pode estar em várias mensagens, com uma linha por mensagem e um só arquivo em disco) e `mensagens_saida (estado)`.
 
 ## 2. Autenticação e autorização
 

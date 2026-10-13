@@ -11,7 +11,7 @@ describe('migrate', () => {
   it('aplica o schema e é idempotente', async () => {
     const db = await novoBanco();
     const primeira = await migrate(db);
-    expect(primeira).toContain('001_core.sql');
+    expect(primeira).toEqual(['001_core.sql', '002_painel_midia_saida.sql']);
     expect(await migrate(db)).toEqual([]);
   });
 
