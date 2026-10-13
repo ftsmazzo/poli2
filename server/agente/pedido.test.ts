@@ -74,6 +74,18 @@ describe('ativaPoli', () => {
     expect(ativaPoli(msg('e o telefone?', { citadaAutor: DONO }), POLI).ativa).toBe(false);
   });
 
+  it('responde ao nome do perfil dela no começo da frase, com ou sem @, sem diferenciar maiúscula nem acento', () => {
+    expect(ativaPoli(msg('@MapSolar link do Flaviômetro'), POLI, null, 'MapSolar')).toEqual({ ativa: true, consulta: 'link do Flaviômetro' });
+    expect(ativaPoli(msg('mapsolar, resume ontem'), POLI, null, 'MapSolar')).toMatchObject({ ativa: true, consulta: 'resume ontem' });
+    expect(ativaPoli(msg('  mapsolar: oi'), POLI, null, 'Map Sólar'.replace(' ', ''))).toMatchObject({ ativa: true, consulta: 'oi' });
+  });
+
+  it('o nome do perfil só vale no começo e como palavra inteira', () => {
+    expect(ativaPoli(msg('MapSolarium link do plano'), POLI, null, 'MapSolar').ativa).toBe(false);
+    expect(ativaPoli(msg('alguém viu o MapSolar hoje?'), POLI, null, 'MapSolar').ativa).toBe(false);
+    expect(ativaPoli(msg('@MapSolar oi'), POLI, null, null).ativa).toBe(false);
+  });
+
   it('sem saber o próprio número, só o nome "Poli2" funciona', () => {
     expect(ativaPoli(msg('@5596900000000 oi', { mencionados: [POLI] }), null).ativa).toBe(false);
     expect(ativaPoli(msg('Poli2 oi'), null).ativa).toBe(true);
@@ -129,6 +141,21 @@ describe('avaliarPedido', () => {
     expect((await avaliarPedido(db, 'inst-a', msg('Poli2 oi', { tipo: 'imagem' }), dono)).tipo).toBe('ignorar');
     expect((await avaliarPedido(db, 'inst-a', msg('bom dia'), dono)).tipo).toBe('ignorar');
     expect((await avaliarPedido(db, 'outra', msg('Poli2 oi'), dono)).tipo).toBe('ignorar');
+  });
+
+  it('atende pelo nome do perfil guardado para a instância', async () => {
+    await db.query(`update instancias_wa set nome_perfil = 'MapSolar'`);
+    const r = await avaliarPedido(db, 'inst-a', msg('@MapSolar link do Flaviômetro'), dono);
+    expect(r).toMatchObject({ tipo: 'pedido', pedido: { consulta: 'link do Flaviômetro' } });
+  });
+
+  it('quando recusa, mostra o telefone do autor mascarado para o dono se reconhecer, sem expor o número', async () => {
+    const r = await avaliarPedido(db, 'inst-a', msg('Poli2 oi', { participant: '123456789012345@lid', participantAlt: '5511999990000@s.whatsapp.net' }), dono);
+    expect(r.tipo).toBe('nao_autorizado');
+    if (r.tipo === 'nao_autorizado') {
+      expect(r.detalhe).toContain('5511*****0000');
+      expect(r.detalhe).not.toContain('5511999990000');
+    }
   });
 
   it('recusa quem não está autorizado e diz só o tipo do identificador, sem número', async () => {

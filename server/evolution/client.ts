@@ -10,6 +10,8 @@ export interface InstanciaEvo {
   status: string | null;
   // Número da própria instância (o da Poli), usado para saber quando ela é marcada.
   jid: string | null;
+  // Nome do perfil do WhatsApp (o que as pessoas veem no grupo).
+  perfil: string | null;
 }
 
 export interface WebhookAtual {
@@ -47,6 +49,7 @@ export async function listarInstancias(cfg: EvolutionCfg, f: Fetcher = fetch): P
       nome: String(i?.name ?? i?.instanceName ?? i?.instance?.instanceName ?? ''),
       status: (i?.connectionStatus ?? i?.instance?.status ?? null) as string | null,
       jid: (i?.ownerJid ?? i?.owner ?? i?.instance?.owner ?? null) as string | null,
+      perfil: (typeof i?.profileName === 'string' && i.profileName.trim() ? i.profileName.trim() : null) as string | null,
     }))
     .filter((i) => i.nome !== '');
 }

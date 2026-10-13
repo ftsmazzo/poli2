@@ -89,6 +89,17 @@ describe('LID <-> telefone', () => {
       expect(i.rows[0].lid_proprio).toBeNull();
     });
 
+    it('conta quantos números autorizados estão de fato nos grupos', async () => {
+      estado.participantes = [
+        { id: '111111111111111@lid', phoneNumber: POLI_TEL },
+        { id: '222222222222222@lid', phoneNumber: `${DONO_TEL}@s.whatsapp.net` },
+      ];
+      const f = evolutionFalsa(estado);
+      expect((await descobrirIdentificadores(db, EVO, 'inst-a', f, [DONO_TEL])).comandantesPresentes).toBe(1);
+      expect((await descobrirIdentificadores(db, EVO, 'inst-a', f, ['5511888880000'])).comandantesPresentes).toBe(0);
+      expect((await descobrirIdentificadores(db, EVO, 'inst-a', f)).comandantesPresentes).toBe(0);
+    });
+
     it('ignora instância que não é de nenhum tenant', async () => {
       const r = await descobrirIdentificadores(db, EVO, 'outra', evolutionFalsa(estado));
       expect(r.participantes).toBe(0);

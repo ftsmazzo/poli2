@@ -43,12 +43,31 @@ const dominio = (jid: string | null) => (jid && jid.includes('@') ? jid.split('@
 
 const CHAMADA_POR_NOME = /^\s*@?poli\s?2\b[\s,:!.\-]*/i;
 
+const semAcento = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+
+// Quantos caracteres do começo do texto são o nome do perfil da Poli (com ou sem @, sem diferenciar
+// maiúscula nem acento). Palavra inteira: "MapSolarium" não é "MapSolar".
+function tamanhoDoNomeNoInicio(texto: string, nome: string | null): number {
+  if (!nome) return 0;
+  const prefixo = /^\s*@?/.exec(texto)?.[0].length ?? 0;
+  const resto = texto.slice(prefixo);
+  if (semAcento(resto.slice(0, nome.length)) !== semAcento(nome)) return 0;
+  if (/^[\p{L}\p{N}]/u.test(resto.slice(nome.length))) return 0;
+  return prefixo + nome.length;
+}
+
+// "5516998480805" -> "5516*****0805": o dono reconhece o próprio número e o log não expõe o resto.
+function mascarar(digitos: string): string {
+  return digitos.length >= 9 ? `${digitos.slice(0, 4)}${'*'.repeat(digitos.length - 8)}${digitos.slice(-4)}` : '***';
+}
+
 // A Poli só responde quando é chamada: marcação do número dela, resposta a uma mensagem dela,
 // ou frase começando por "Poli2". O nome "Poli" sozinho é da versão 1, que continua no grupo.
 export function ativaPoli(
   msg: MensagemNormalizada,
   jidProprio: string | null,
   lidProprio: string | null = null,
+  nomePerfil: string | null = null,
 ): { ativa: boolean; consulta: string } {
   const texto = msg.texto ?? '';
   const proprio = numeroDe(jidProprio);
@@ -61,12 +80,14 @@ export function ativaPoli(
   const respondeuPoli = msg.citadaAutor !== null && eu(numeroDe(msg.citadaAutor));
   const chamouPorNome = CHAMADA_POR_NOME.test(texto);
 
-  const consulta = texto
+  const nomeNoInicio = tamanhoDoNomeNoInicio(texto, nomePerfil);
+  const aposONome = nomeNoInicio > 0 ? texto.slice(nomeNoInicio).replace(/^[\s,:!.\-]+/, '') : texto;
+  const consulta = aposONome
     .replace(/@\d{8,15}/g, ' ')
     .replace(CHAMADA_POR_NOME, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return { ativa: marcou || marcouNoTexto || respondeuPoli || chamouPorNome, consulta };
+  return { ativa: marcou || marcouNoTexto || respondeuPoli || chamouPorNome || nomeNoInicio > 0, consulta };
 }
 
 // O autor pode vir como número ou como LID (identificador interno do WhatsApp); o número real, quando
@@ -89,12 +110,12 @@ export async function avaliarPedido(
   if (msg.fromMe || msg.tipo !== 'texto' || !msg.texto) return { tipo: 'ignorar' };
 
   const inst = await db.query(
-    'select workspace_id, jid_proprio, lid_proprio from instancias_wa where evolution_instance = $1 and ativa',
+    'select workspace_id, jid_proprio, lid_proprio, nome_perfil from instancias_wa where evolution_instance = $1 and ativa',
     [instancia],
   );
   if (inst.rows.length === 0) return { tipo: 'ignorar' };
 
-  const chamada = ativaPoli(msg, inst.rows[0].jid_proprio, inst.rows[0].lid_proprio);
+  const chamada = ativaPoli(msg, inst.rows[0].jid_proprio, inst.rows[0].lid_proprio, inst.rows[0].nome_perfil);
   if (!chamada.ativa) {
     const tipos = msg.mencionados.map((j) => dominio(j)).sort().join(',') || 'nenhum';
     return {
@@ -112,7 +133,12 @@ export async function avaliarPedido(
       )
     : [];
   if (!ehComandante(msg, comandantes, conhecidos)) {
-    return { tipo: 'nao_autorizado', detalhe: `autor: ${dominio(msg.autorJid)}; alternativo: ${dominio(msg.autorAlt)}` };
+    // O telefone sai mascarado (começo e 4 últimos dígitos): dá para o dono reconhecer o próprio número.
+    const telefones = [...new Set([msg.autorAlt, ...conhecidos].filter((t): t is string => !!t).map(numeroDe).filter(Boolean))];
+    return {
+      tipo: 'nao_autorizado',
+      detalhe: `autor: ${dominio(msg.autorJid)}; alternativo: ${dominio(msg.autorAlt)}; telefone do autor: ${telefones.map(mascarar).join(', ') || 'desconhecido'}`,
+    };
   }
 
   const grupo = await db.query('select nome from grupos where workspace_id = $1 and jid = $2', [

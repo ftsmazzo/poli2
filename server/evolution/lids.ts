@@ -11,6 +11,8 @@ export interface ResultadoIdentificadores {
   campos: string[];
   lidProprio: string | null;
   via: 'participantes' | 'consulta' | 'nenhum';
+  // Quantos dos números autorizados a pedir estão de fato nos grupos (0 = o número configurado não está lá).
+  comandantesPresentes: number;
 }
 
 const ehLid = (v: unknown): v is string => typeof v === 'string' && v.endsWith('@lid');
@@ -39,8 +41,20 @@ export async function descobrirIdentificadores(
   evo: EvolutionCfg,
   instancia: string,
   f: typeof fetch = fetch,
+  comandantes: string[] = [],
 ): Promise<ResultadoIdentificadores> {
-  const r: ResultadoIdentificadores = { participantes: 0, comLid: 0, comTelefone: 0, pares: 0, campos: [], lidProprio: null, via: 'nenhum' };
+  const r: ResultadoIdentificadores = {
+    participantes: 0,
+    comLid: 0,
+    comTelefone: 0,
+    pares: 0,
+    campos: [],
+    lidProprio: null,
+    via: 'nenhum',
+    comandantesPresentes: 0,
+  };
+  const chavesComandantes = new Set(comandantes.map(chaveNumero));
+  const presentes = new Set<string>();
 
   const inst = await db.query('select workspace_id, jid_proprio from instancias_wa where evolution_instance = $1 and ativa', [instancia]);
   if (inst.rows.length === 0) return r;
@@ -57,7 +71,10 @@ export async function descobrirIdentificadores(
     for (const k of Object.keys(p ?? {})) campos.add(k);
     const { lid, telefone } = parDoParticipante(p);
     if (lid) r.comLid++;
-    if (telefone) r.comTelefone++;
+    if (telefone) {
+      r.comTelefone++;
+      if (chavesComandantes.has(chaveNumero(telefone))) presentes.add(chaveNumero(telefone));
+    }
     if (!lid || !telefone) continue;
     if (chaveProprio && chaveNumero(telefone) === chaveProprio) r.lidProprio = lid;
     if (vistos.has(lid)) continue;
@@ -66,6 +83,7 @@ export async function descobrirIdentificadores(
     r.pares++;
   }
   r.campos = [...campos].sort();
+  r.comandantesPresentes = presentes.size;
   if (r.lidProprio) r.via = 'participantes';
 
   // Plano B: perguntar à Evolution como o WhatsApp conhece o número da Poli.

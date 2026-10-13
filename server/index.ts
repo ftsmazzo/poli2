@@ -126,9 +126,10 @@ async function sincronizarEvolution(): Promise<void> {
 
         // Liga LID <-> telefone e descobre o LID da própria Poli. Só registra quando o resultado muda.
         try {
-          const i = await descobrirIdentificadores(db, evo, nome);
+          const i = await descobrirIdentificadores(db, evo, nome, fetch, cfg.comandantes);
           const resumo =
             `participantes ${i.participantes}; com LID ${i.comLid}; com telefone ${i.comTelefone}; pares aprendidos ${i.pares}; ` +
+            `comandantes presentes nos grupos: ${i.comandantesPresentes} de ${cfg.comandantes.length}; ` +
             `campos [${i.campos.join(',')}]; LID próprio: ${i.lidProprio ? `encontrado (${i.via})` : 'NÃO encontrado'}`;
           if (ultimoResumoIdentificadores.get(nome) !== resumo) {
             ultimoResumoIdentificadores.set(nome, resumo);

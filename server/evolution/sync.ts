@@ -43,10 +43,16 @@ export async function sincronizarInstancias(
   const instancias = await listarInstancias(evo, f);
   resultado.instancias = instancias.length;
 
-  for (const { nome, jid } of instancias) {
+  for (const { nome, jid, perfil } of instancias) {
     // Uma instância com problema não pode travar as outras.
     try {
       if (await garantirTenant(db, nome)) resultado.tenantsCriados.push(nome);
+      if (perfil) {
+        await db.query(
+          'update instancias_wa set nome_perfil = $2 where evolution_instance = $1 and nome_perfil is distinct from $2',
+          [nome, perfil],
+        );
+      }
       if (jid) {
         await db.query(
           'update instancias_wa set jid_proprio = $2 where evolution_instance = $1 and jid_proprio is distinct from $2',
