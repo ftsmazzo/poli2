@@ -280,11 +280,24 @@ describe('API do painel', () => {
       await db.query(`insert into mensagens (workspace_id, grupo_id, wa_message_id, enviada_em, texto) values (1, 1, 'M1', now(), 'oi')`);
       await db.query(`insert into turnos (workspace_id, pergunta, tools, resposta, latencia_ms) values (1, 'link do plano', '["buscar_itens"]', 'x', 1200)`);
       const d = (await chamar('/diagnostico', { cookie })).corpo;
-      expect(d.instancia).toEqual({ nome: 'poli', nomePerfil: 'MapSolar', numeroConhecido: true, lidConhecido: false });
+      expect(d.instancia).toEqual({ nome: 'poli', nomePerfil: 'MapSolar', numeroConhecido: true, lidConhecido: false, estadoConexao: null, estadoEm: null });
       expect(d.totais).toMatchObject({ mensagens: 1, grupos: 1, itens: 0 });
       expect(d.extracaoPendente).toBe(1);
       expect(d.ultimosTurnos[0]).toMatchObject({ pergunta: 'link do plano', ferramentas: ['buscar_itens'], respondido: true });
       expect(JSON.stringify(d)).not.toContain('5596900000000');
+    });
+
+    it('mostra o estado da conexão e as últimas leituras (o que a Poli concluiu), só do tenant', async () => {
+      const cookie = await entrar(1);
+      await db.query(`insert into instancias_wa (workspace_id, evolution_instance, estado_conexao, estado_em) values (1, 'poli', 'open', now())`);
+      await db.query(`insert into grupos (workspace_id, jid, nome) values (1, '1@g.us', 'IE'), (2, '2@g.us', 'Do outro')`);
+      await db.query(`insert into resumos (workspace_id, grupo_id, de_msg_id, ate_msg_id, de_em, ate_em, texto, importancia)
+        values (1, 1, 1, 5, now(), now(), 'Falaram do boato.', 3), (2, 2, 1, 5, now(), now(), 'Segredo do outro tenant.', 2)`);
+      const d = (await chamar('/diagnostico', { cookie })).corpo;
+      expect(d.instancia).toMatchObject({ estadoConexao: 'open' });
+      expect(d.ultimasLeituras).toHaveLength(1);
+      expect(d.ultimasLeituras[0]).toMatchObject({ grupo: 'IE', importancia: 3, resumo: 'Falaram do boato.' });
+      expect(JSON.stringify(d)).not.toContain('Segredo do outro tenant');
     });
 
     it('mostra os alertas esperando envio, os que desistiram e os que ficaram sem destino', async () => {

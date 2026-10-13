@@ -54,6 +54,20 @@ export function DiagnosticoPagina() {
                   <dd>
                     <SimNao valor={d.instancia.lidConhecido} />
                   </dd>
+                  <dt>Conexão com o WhatsApp</dt>
+                  <dd>
+                    {d.instancia.estadoConexao === 'open' ? (
+                      <span className="pilula pilula-ok">
+                        <IconeOk /> Conectado
+                      </span>
+                    ) : d.instancia.estadoConexao ? (
+                      <span className="pilula pilula-erro">
+                        <IconeErro /> Desconectado ({d.instancia.estadoConexao})
+                      </span>
+                    ) : (
+                      <span className="suave">ainda não verificada</span>
+                    )}
+                  </dd>
                 </dl>
               ) : (
                 <p>
@@ -117,6 +131,42 @@ export function DiagnosticoPagina() {
               </section>
             )}
           </div>
+
+          {d.ultimasLeituras && (
+            <section className="cartao" aria-labelledby="d-leituras">
+              <h2 id="d-leituras">Últimas leituras dos grupos</h2>
+              {d.ultimasLeituras.length === 0 ? (
+                <p className="suave">
+                  Nenhuma leitura ainda. Ligue &quot;Acompanhar&quot; em Grupos: a Poli faz um resumo inicial das últimas 24 horas e depois lê o que chegar a cada intervalo.
+                </p>
+              ) : (
+                <div className="rolagem">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Grupo</th>
+                        <th scope="col">Quando</th>
+                        <th scope="col">Importância</th>
+                        <th scope="col">O que a Poli concluiu</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {d.ultimasLeituras.map((l, i) => (
+                        <tr key={`${l.criadoEm}-${i}`}>
+                          <th scope="row">{l.grupo ?? 'sem nome'}</th>
+                          <td>
+                            <Quando iso={l.criadoEm} vazio="" />
+                          </td>
+                          <td>{['0 · nada de novo', '1 · registrar', '2 · importante', '3 · urgente'][l.importancia] ?? l.importancia}</td>
+                          <td>{l.resumo}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="cartao" aria-labelledby="d-fontes">
             <h2 id="d-fontes">Fontes</h2>

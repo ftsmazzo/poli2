@@ -21,6 +21,9 @@ export function problemasDoDiagnostico(d: Diagnostico): string[] {
   const p: string[] = [];
   if (!d.instancia) p.push('Nenhum número de WhatsApp está conectado a este workspace.');
   else if (!d.instancia.numeroConhecido) p.push('O número do WhatsApp conectado ainda não foi identificado.');
+  if (d.instancia?.estadoConexao && d.instancia.estadoConexao !== 'open') {
+    p.push(`O número da Poli está desconectado do WhatsApp (estado: ${d.instancia.estadoConexao}). Sem conexão ela não recebe mensagens nem responde: reconecte lendo o QR code na Evolution.`);
+  }
   for (const f of d.fontes) {
     if (f.ativa && f.status === 'erro') p.push(`A Fonte "${f.nome}" está com erro${f.ultimoErro ? `: ${f.ultimoErro}` : '.'}`);
   }

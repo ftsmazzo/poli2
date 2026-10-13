@@ -11,6 +11,8 @@ import { prepararEnvios } from './envio';
 export const IMPORTANCIA_MINIMA = 2;
 export const LIMITE_DIARIO_IMPORTANCIA_2 = 5;
 const MAX_MENSAGENS = 400;
+// Ao ligar um grupo, a Poli resume este tanto de histórico (sem alertar) para a equipe ver que está funcionando.
+const JANELA_DO_RESUMO_INICIAL_MS = 24 * 60 * 60_000;
 const FUSO = 'America/Belem';
 
 const esquema = z.object({
@@ -45,6 +47,16 @@ export interface GrupoParaLer {
 
 export type SituacaoLeitura = 'inicio' | 'sem_novidade' | 'lido' | 'alerta' | 'falha';
 
+interface LinhaDeMensagem {
+  id: number | string;
+  enviada_em: string | Date;
+  autor: string;
+  texto: string;
+}
+
+const emLinhas = (rows: LinhaDeMensagem[]) =>
+  rows.map((m) => `[${formatarQuando(m.enviada_em)}] ${m.autor}: ${String(m.texto).replace(/\s+/g, ' ')}`);
+
 // Lê as mensagens novas de um grupo: resume, dá a nota de importância e, se for o caso, cria o alerta.
 export async function lerGrupo(db: Db, chat: Chat, modelo: string, g: GrupoParaLer, agora = new Date()): Promise<SituacaoLeitura> {
   const marcar = (msgId: number | null) =>
@@ -54,9 +66,51 @@ export async function lerGrupo(db: Db, chat: Chat, modelo: string, g: GrupoParaL
       msgId,
     ]);
 
-  // Primeira vez: começa do que chegar daqui para a frente, sem analisar (e pagar por) todo o histórico.
+  const pedirAnalise = async (evidencia: string, inicial: boolean) => {
+    const pedido = [
+      { role: 'system' as const, content: promptAnalista() },
+      {
+        role: 'user' as const,
+        content:
+          `Grupo: ${g.nome ?? 'sem nome'}\nAgora: ${formatarQuando(agora)}\n` +
+          (inicial
+            ? 'Este é o RESUMO INICIAL das últimas 24 horas, para a equipe ver o que o grupo andou falando. Preencha o resumo e use alerta null: coisa antiga não gera alerta.\n'
+            : '') +
+          `\nMensagens ${inicial ? 'das últimas 24 horas' : 'novas'}:\n${evidencia}`,
+      },
+    ];
+    // Uma segunda chance se a resposta não vier em JSON válido.
+    return lerResposta((await chat({ model: modelo, messages: pedido })).content) ?? lerResposta((await chat({ model: modelo, messages: pedido })).content);
+  };
+
+  const guardarResumo = (analise: { resumo: string; importancia: number }, rows: LinhaDeMensagem[]) =>
+    db.query(
+      `insert into resumos (workspace_id, grupo_id, de_msg_id, ate_msg_id, de_em, ate_em, texto, importancia)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+      [g.workspace_id, g.id, Number(rows[0].id), Number(rows[rows.length - 1].id), rows[0].enviada_em, rows[rows.length - 1].enviada_em, analise.resumo, analise.importancia],
+    );
+
+  // Primeira vez: resume as últimas 24 horas (sem alertar) e passa a acompanhar só o que chegar daqui em diante.
   if (g.ultima_leitura_msg_id === null) {
     const max = await db.query('select coalesce(max(id), 0) as m from mensagens where grupo_id = $1', [g.id]);
+    const recentes = await db.query(
+      `select * from (
+         select m.id, m.enviada_em, coalesce(p.nome, 'alguém') as autor, left(m.texto, 500) as texto
+         from mensagens m left join pessoas p on p.id = m.autor_pessoa_id
+         where m.grupo_id = $1 and m.texto is not null and m.tipo <> 'sticker' and m.enviada_em >= $2
+         order by m.id desc limit ${MAX_MENSAGENS}
+       ) t order by id`,
+      [g.id, new Date(agora.getTime() - JANELA_DO_RESUMO_INICIAL_MS).toISOString()],
+    );
+    if (recentes.rows.length > 0) {
+      try {
+        const analise = await pedirAnalise(emLinhas(recentes.rows as LinhaDeMensagem[]).join('\n'), true);
+        if (analise) await guardarResumo(analise, recentes.rows as LinhaDeMensagem[]);
+      } catch (err) {
+        // Falha no resumo inicial não pode impedir o acompanhamento de começar.
+        console.error('resumo inicial falhou:', err instanceof Error ? err.message : err);
+      }
+    }
     await marcar(Number(max.rows[0].m));
     return 'inicio';
   }
@@ -73,16 +127,8 @@ export async function lerGrupo(db: Db, chat: Chat, modelo: string, g: GrupoParaL
     return 'sem_novidade';
   }
 
-  const linhas = novas.rows.map((m) => `[${formatarQuando(m.enviada_em)}] ${m.autor}: ${String(m.texto).replace(/\s+/g, ' ')}`);
-  const evidencia = linhas.join('\n');
-  const pedido = [
-    { role: 'system' as const, content: promptAnalista() },
-    { role: 'user' as const, content: `Grupo: ${g.nome ?? 'sem nome'}\nAgora: ${formatarQuando(agora)}\n\nMensagens novas:\n${evidencia}` },
-  ];
-
-  // Uma segunda chance se a resposta não vier em JSON válido.
-  let analise = lerResposta((await chat({ model: modelo, messages: pedido })).content);
-  if (!analise) analise = lerResposta((await chat({ model: modelo, messages: pedido })).content);
+  const evidencia = emLinhas(novas.rows as LinhaDeMensagem[]).join('\n');
+  const analise = await pedirAnalise(evidencia, false);
   if (!analise) {
     // Não avança o ponteiro: as mesmas mensagens são lidas de novo no próximo intervalo.
     await marcar(null);
@@ -90,12 +136,7 @@ export async function lerGrupo(db: Db, chat: Chat, modelo: string, g: GrupoParaL
   }
 
   const ultimoId = Number(novas.rows[novas.rows.length - 1].id);
-  const primeiroId = Number(novas.rows[0].id);
-  const resumo = await db.query(
-    `insert into resumos (workspace_id, grupo_id, de_msg_id, ate_msg_id, de_em, ate_em, texto, importancia)
-     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
-    [g.workspace_id, g.id, primeiroId, ultimoId, novas.rows[0].enviada_em, novas.rows[novas.rows.length - 1].enviada_em, analise.resumo, analise.importancia],
-  );
+  const resumo = await guardarResumo(analise, novas.rows as LinhaDeMensagem[]);
   await marcar(ultimoId);
 
   // A trava de links, telefones e cifras vale também aqui: um alerta com dado que não está nas mensagens não sai.

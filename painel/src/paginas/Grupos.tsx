@@ -40,7 +40,7 @@ export function Grupos() {
           Atualizar
         </button>
       </div>
-      <p className="ajuda">Ligue &quot;Acompanhar&quot; para a Poli ler o grupo de tempos em tempos, resumir e alertar os Heads quando algo for importante. Ao ligar, ela começa do que chegar dali em diante, sem analisar o histórico. Os alertas vão para o privado de cada pessoa marcada como Head em Pessoas e para o grupo marcado como &quot;Grupo dos Heads&quot; (só o administrador escolhe). As mudanças são salvas na hora.</p>
+      <p className="ajuda">Ligue &quot;Acompanhar&quot; para a Poli ler o grupo de tempos em tempos, resumir e alertar os Heads quando algo for importante. Ao ligar, ela faz um resumo inicial das últimas 24 horas (sem gerar alerta, e você o vê em Diagnóstico) e depois lê só o que chegar. Os alertas vão para o privado de cada pessoa marcada como Head em Pessoas e para o grupo marcado como &quot;Grupo dos Heads&quot; (só o administrador escolhe). As mudanças são salvas na hora.</p>
       {aviso && <Aviso aoFechar={() => setAviso(null)}>{aviso}</Aviso>}
       {carregando && !dados && <Carregando />}
       {erro && <ErroCarga mensagem={erro} aoTentar={recarregar} />}
@@ -60,6 +60,7 @@ export function Grupos() {
                     Mensagens
                   </th>
                   <th scope="col">Última mensagem</th>
+                  <th scope="col">Última leitura</th>
                   <th scope="col">Histórico importado</th>
                   <th scope="col">Acompanhar</th>
                   <th scope="col">Intervalo de leitura</th>
@@ -75,6 +76,9 @@ export function Grupos() {
                       <td className="num">{numero(g.mensagens)}</td>
                       <td>
                         <Quando iso={g.ultimaMensagemEm} vazio="sem mensagens" />
+                      </td>
+                      <td>
+                        <Quando iso={g.ultimaLeituraEm} vazio="ainda não" />
                       </td>
                       <td>
                         <Quando iso={g.historicoImportadoEm} vazio="não" />

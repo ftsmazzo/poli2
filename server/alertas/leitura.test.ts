@@ -50,16 +50,56 @@ describe('leitura de grupos', () => {
     await db.query(`insert into pessoas (workspace_id, nome, telefone, papel) values (1, 'Ary', '5596999990001', 'head')`);
   });
 
-  it('na primeira vez só marca o ponto de partida: não analisa o histórico e não chama o modelo', async () => {
-    await msg('conversa antiga 1');
-    await msg('conversa antiga 2');
-    expect(await ler()).toBe('inicio');
-    expect(chamadas).toBe(0);
-    const g = await grupo();
-    expect(Number(g.ultima_leitura_msg_id)).toBeGreaterThan(0);
-    expect(g.ultima_leitura_em).not.toBeNull();
-    // O que chegou antes não é lido depois.
-    expect(await ler()).toBe('sem_novidade');
+  describe('ao ligar o acompanhamento (resumo inicial)', () => {
+    it('resume as últimas 24 horas, ignora o que é mais velho e nunca gera alerta sobre coisa antiga', async () => {
+      await msg('conversa de três dias atrás', '2026-10-11T09:00:00-03:00');
+      await msg('o boato do local de votação começou hoje cedo', '2026-10-14T08:00:00-03:00');
+      let visto = '';
+      resposta = (c) => ((visto = c), json(3, 'Boato sobre o local de votação.', 'Falaram do boato desde cedo.'));
+
+      expect(await ler()).toBe('inicio');
+      expect(chamadas).toBe(1);
+      expect(visto).toContain('RESUMO INICIAL');
+      expect(visto).toContain('o boato do local de votação começou hoje cedo');
+      expect(visto).not.toContain('três dias atrás');
+
+      const r = await db.query<{ texto: string; importancia: number }>('select texto, importancia from resumos');
+      expect(r.rows).toEqual([{ texto: 'Falaram do boato desde cedo.', importancia: 3 }]);
+      // O resumo inicial aparece para a equipe, mas não dispara alerta: a notícia já é velha.
+      expect((await db.query<{ n: string }>('select count(*)::text as n from alertas')).rows[0].n).toBe('0');
+      expect((await db.query<{ n: string }>('select count(*)::text as n from mensagens_saida')).rows[0].n).toBe('0');
+    });
+
+    it('o que existia antes não é lido de novo: só o que chegar depois', async () => {
+      await msg('conversa de hoje cedo', '2026-10-14T08:00:00-03:00');
+      await ler();
+      const g = await grupo();
+      expect(Number(g.ultima_leitura_msg_id)).toBeGreaterThan(0);
+      expect(g.ultima_leitura_em).not.toBeNull();
+      const antes = chamadas;
+      expect(await ler()).toBe('sem_novidade');
+      expect(chamadas).toBe(antes);
+    });
+
+    it('sem nada nas últimas 24 horas não chama o modelo, mas o acompanhamento começa', async () => {
+      await msg('conversa de três dias atrás', '2026-10-11T09:00:00-03:00');
+      expect(await ler()).toBe('inicio');
+      expect(chamadas).toBe(0);
+      expect((await db.query<{ n: string }>('select count(*)::text as n from resumos')).rows[0].n).toBe('0');
+      expect(Number((await grupo()).ultima_leitura_msg_id)).toBeGreaterThan(0);
+    });
+
+    it('se o resumo inicial falhar, o acompanhamento começa assim mesmo', async () => {
+      await msg('conversa de hoje cedo', '2026-10-14T08:00:00-03:00');
+      const quebra: Chat = async () => {
+        throw new Error('OpenRouter respondeu 500');
+      };
+      const g = await grupo();
+      const s = await lerGrupo(db, quebra, 'm', { id: 1, workspace_id: 1, nome: g.nome, ultima_leitura_msg_id: null }, AGORA);
+      expect(s).toBe('inicio');
+      expect(Number((await grupo()).ultima_leitura_msg_id)).toBeGreaterThan(0);
+      expect((await db.query<{ n: string }>('select count(*)::text as n from resumos')).rows[0].n).toBe('0');
+    });
   });
 
   it('com mensagens novas importantes: guarda o resumo, cria o alerta e prepara o envio aos Heads', async () => {

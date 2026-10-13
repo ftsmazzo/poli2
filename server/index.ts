@@ -131,6 +131,10 @@ async function iniciarBanco(): Promise<void> {
 }
 
 const ultimoResumoIdentificadores = new Map<string, string>();
+const ultimoEstadoWhatsapp = new Map<string, string>();
+// Listar grupos e participantes pesa no WhatsApp (que limita esse tipo de consulta): por instância, no máximo
+// uma vez por hora, ou em 15 minutos se a última tentativa falhou.
+const proximaConsultaDeGrupos = new Map<string, number>();
 const LOCK_SINCRONIZACAO = 8421002;
 const INTERVALO_SINCRONIZACAO_MS = 5 * 60_000;
 
@@ -143,6 +147,13 @@ async function sincronizarEvolution(): Promise<void> {
   try {
     await comLockTentativa(pool, LOCK_SINCRONIZACAO, async (db) => {
       const r = await sincronizarInstancias(db, evo, opcoes);
+      // A conexão do número com o WhatsApp: só registra quando muda (e na primeira vez, ao subir).
+      for (const [nomeDaInstancia, estado] of Object.entries(r.estados)) {
+        if (estado && ultimoEstadoWhatsapp.get(nomeDaInstancia) !== estado) {
+          ultimoEstadoWhatsapp.set(nomeDaInstancia, estado);
+          console.log(`whatsapp ${nomeDaInstancia}: conexão ${estado}`);
+        }
+      }
       if (r.tenantsCriados.length || r.webhooksConfigurados.length || r.erros.length) {
         console.log(
           `evolution: ${r.instancias} instância(s); tenants criados: [${r.tenantsCriados}]; webhooks ajustados: [${r.webhooksConfigurados}]; erros: [${r.erros}]`,
@@ -152,6 +163,8 @@ async function sincronizarEvolution(): Promise<void> {
       // Histórico: cada grupo é importado uma vez, depois só o webhook traz mensagens.
       const instancias = await db.query('select evolution_instance from instancias_wa where ativa');
       for (const { evolution_instance: nome } of instancias.rows) {
+        if (Date.now() < (proximaConsultaDeGrupos.get(nome) ?? 0)) continue;
+        let falhou = false;
         try {
           const h = await importarHistoricoPendente(db, evo, nome);
           if (h.gruposImportados || h.erros.length) {
@@ -160,6 +173,7 @@ async function sincronizarEvolution(): Promise<void> {
             );
           }
         } catch (err) {
+          falhou = true;
           console.error(`histórico ${nome} falhou:`, err instanceof Error ? err.message : err);
         }
 
@@ -175,8 +189,10 @@ async function sincronizarEvolution(): Promise<void> {
             console.log(`identificadores ${nome}: ${resumo}`);
           }
         } catch (err) {
+          falhou = true;
           console.error(`identificadores ${nome} falhou:`, err instanceof Error ? err.message : err);
         }
+        proximaConsultaDeGrupos.set(nome, Date.now() + (falhou ? 15 : 60) * 60_000);
       }
     });
   } catch (err) {

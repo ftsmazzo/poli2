@@ -432,12 +432,12 @@ export function painelRouter(deps: DepsApi): Router {
   r.get('/diagnostico', exigir(), async (_req, res) => {
     const ws = ctx(res).workspaceId;
     const um = async (sql: string) => (await db.query(sql, [ws])).rows[0];
-    const [totais, inst, midias, pendentes, turnos, alertas] = await Promise.all([
+    const [totais, inst, midias, pendentes, turnos, alertas, leituras] = await Promise.all([
       um(`select (select count(*)::int from mensagens where workspace_id = $1) as mensagens,
                  (select count(*)::int from itens where workspace_id = $1) as itens,
                  (select count(*)::int from grupos where workspace_id = $1) as grupos,
                  (select count(*)::int from pessoas where workspace_id = $1) as pessoas`),
-      um(`select evolution_instance, nome_perfil, jid_proprio, lid_proprio from instancias_wa where workspace_id = $1 order by id limit 1`),
+      um(`select evolution_instance, nome_perfil, jid_proprio, lid_proprio, estado_conexao, estado_em from instancias_wa where workspace_id = $1 order by id limit 1`),
       um(`select count(*) filter (where estado = 'pendente')::int as pendentes, count(*) filter (where estado = 'falhou')::int as falhas
           from midias where workspace_id = $1`),
       um(`select count(*)::int as n from mensagens where workspace_id = $1 and itens_extraidos_em is null`),
@@ -452,11 +452,26 @@ export function painelRouter(deps: DepsApi): Router {
             (select count(*) from alertas a where a.workspace_id = $1 and a.enviado_em is null and a.criado_em > now() - interval '24 hours'
                and not exists (select 1 from mensagens_saida m where m.alerta_id = a.id))::int as sem_destino,
             (select count(*) from grupos where workspace_id = $1 and acompanhar)::int as grupos_acompanhados`),
+      // O que a Poli concluiu nas últimas leituras: é como o dono confere que o acompanhamento está funcionando.
+      db.query(
+        `select g.nome, r.ate_em, r.criado_em, r.importancia, left(r.texto, 300) as texto
+         from resumos r join grupos g on g.id = r.grupo_id
+         where r.workspace_id = $1 order by r.criado_em desc limit 8`,
+        [ws],
+      ),
     ]);
     res.json({
       instancia: inst
-        ? { nome: inst.evolution_instance, nomePerfil: inst.nome_perfil, numeroConhecido: !!inst.jid_proprio, lidConhecido: !!inst.lid_proprio }
+        ? {
+            nome: inst.evolution_instance,
+            nomePerfil: inst.nome_perfil,
+            numeroConhecido: !!inst.jid_proprio,
+            lidConhecido: !!inst.lid_proprio,
+            estadoConexao: inst.estado_conexao,
+            estadoEm: inst.estado_em,
+          }
         : null,
+      ultimasLeituras: leituras.rows.map((l) => ({ grupo: l.nome, ateEm: l.ate_em, criadoEm: l.criado_em, importancia: l.importancia, resumo: l.texto })),
       totais,
       fontes: (await listarFontes(ws)).map((f) => ({ id: f.id, nome: f.nome, ativa: f.ativa, status: f.status, ultimoTesteEm: f.ultimoTesteEm, ultimoErro: f.ultimoErro, latenciaMs: f.latenciaMs })),
       midias,

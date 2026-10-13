@@ -93,11 +93,21 @@ export interface Alerta {
   enviadoEm: string | null;
 }
 export interface Diagnostico {
-  instancia: { nome: string; nomePerfil: string | null; numeroConhecido: boolean; lidConhecido: boolean } | null;
+  instancia: {
+    nome: string;
+    nomePerfil: string | null;
+    numeroConhecido: boolean;
+    lidConhecido: boolean;
+    /** "open" = conectado. Opcional: servidores mais antigos não mandam. */
+    estadoConexao?: string | null;
+    estadoEm?: string | null;
+  } | null;
   totais: { mensagens: number; itens: number; grupos: number; pessoas: number };
   fontes: { id: number; nome: string; ativa: boolean; status: StatusFonte; ultimoTesteEm: string | null; ultimoErro: string | null; latenciaMs: number | null }[];
   midias: { pendentes: number; falhas: number };
   extracaoPendente: number;
+  /** O que a Poli concluiu nas últimas leituras de grupo (confere que o acompanhamento funciona). */
+  ultimasLeituras?: { grupo: string | null; ateEm: string; criadoEm: string; importancia: number; resumo: string }[];
   /** Opcional: servidores mais antigos não mandam. */
   alertas?: { pendentesDeEnvio: number; falhasDeEnvio: number; semDestino: number; gruposAcompanhados: number };
   ultimosTurnos: { quando: string; pergunta: string | null; ferramentas: unknown; latenciaMs: number | null; respondido: boolean }[];

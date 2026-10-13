@@ -8,6 +8,8 @@ export interface OpcoesSync {
 }
 
 export interface ResultadoSync {
+  // Estado da conexão de cada instância no WhatsApp, como a Evolution informou (ex.: "open").
+  estados: Record<string, string | null>;
   instancias: number;
   tenantsCriados: string[];
   webhooksConfigurados: string[];
@@ -33,20 +35,38 @@ async function garantirTenant(db: Db, instancia: string): Promise<boolean> {
   return true;
 }
 
+// Guarda o estado da conexão e, quando o número cai ou volta, registra o evento (a faixa do painel usa isso).
+async function registrarEstado(db: Db, instancia: string, estado: string): Promise<void> {
+  const atual = await db.query('select workspace_id, estado_conexao from instancias_wa where evolution_instance = $1', [instancia]);
+  if (atual.rows.length === 0 || atual.rows[0].estado_conexao === estado) return;
+  const antes = atual.rows[0].estado_conexao as string | null;
+  await db.query('update instancias_wa set estado_conexao = $2, estado_em = now() where evolution_instance = $1', [instancia, estado]);
+  const caiu = antes === 'open' && estado !== 'open';
+  const voltou = antes !== null && antes !== 'open' && estado === 'open';
+  if (caiu || voltou) {
+    await db.query(
+      `insert into eventos_saude (workspace_id, tipo, alvo, estado, detalhe) values ($1, 'instancia', $2, $3, $4)`,
+      [atual.rows[0].workspace_id, instancia, caiu ? 'caiu' : 'voltou', estado],
+    );
+  }
+}
+
 export async function sincronizarInstancias(
   db: Db,
   evo: EvolutionCfg,
   opcoes: OpcoesSync,
   f: typeof fetch = fetch,
 ): Promise<ResultadoSync> {
-  const resultado: ResultadoSync = { instancias: 0, tenantsCriados: [], webhooksConfigurados: [], erros: [] };
+  const resultado: ResultadoSync = { estados: {}, instancias: 0, tenantsCriados: [], webhooksConfigurados: [], erros: [] };
   const instancias = await listarInstancias(evo, f);
   resultado.instancias = instancias.length;
 
-  for (const { nome, jid, perfil } of instancias) {
+  for (const { nome, jid, perfil, status } of instancias) {
     // Uma instância com problema não pode travar as outras.
     try {
       if (await garantirTenant(db, nome)) resultado.tenantsCriados.push(nome);
+      resultado.estados[nome] = status;
+      if (status) await registrarEstado(db, nome, status);
       if (perfil) {
         await db.query(
           'update instancias_wa set nome_perfil = $2 where evolution_instance = $1 and nome_perfil is distinct from $2',
