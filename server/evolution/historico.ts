@@ -52,7 +52,7 @@ export async function importarHistoricoPendente(
         for (const registro of registros) {
           const msg = extrairMensagem(registro);
           if (!msg) continue;
-          const resultado = await gravarMensagem(db, instancia, msg);
+          const resultado = await gravarMensagem(db, instancia, msg, { criarMidia: false });
           if (resultado === 'gravada') {
             r.gravadas++;
             gravadasNoGrupo++;

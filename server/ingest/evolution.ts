@@ -20,6 +20,8 @@ export interface MensagemNormalizada {
   tipo: TipoMensagem;
   texto: string | null;
   citadaWaId: string | null;
+  // Anexo da mensagem (imagem, áudio, documento, vídeo), se houver.
+  midia: { nomeArquivo: string | null; mime: string | null; bytes: number | null } | null;
   bruto: unknown;
 }
 
@@ -98,6 +100,16 @@ function semBase64(v: unknown): unknown {
   return v;
 }
 
+function infoMidia(m: Record<string, any>): MensagemNormalizada['midia'] {
+  const x = m.imageMessage ?? m.audioMessage ?? m.documentMessage ?? m.videoMessage;
+  if (!x) return null;
+  return {
+    nomeArquivo: typeof x.fileName === 'string' && x.fileName ? x.fileName : null,
+    mime: typeof x.mimetype === 'string' ? x.mimetype : null,
+    bytes: Number(x.fileLength?.low ?? x.fileLength) || null,
+  };
+}
+
 // Devolve null para o que a Poli não grava: privado, reação, sem id ou sem hora.
 export function extrairMensagem(data: any): MensagemNormalizada | null {
   const key = data?.key;
@@ -122,6 +134,7 @@ export function extrairMensagem(data: any): MensagemNormalizada | null {
     tipo: c.tipo,
     texto: c.texto,
     citadaWaId: c.citada,
+    midia: infoMidia(message),
     bruto: semBase64(data),
   };
 }
@@ -132,6 +145,8 @@ export async function gravarMensagem(
   db: Db,
   instancia: string,
   msg: MensagemNormalizada,
+  // A importação de histórico não baixa anexos antigos (podem ter expirado na Evolution).
+  opcoes: { criarMidia?: boolean } = {},
 ): Promise<ResultadoGravacao> {
   const ws = await db.query(
     'select workspace_id from instancias_wa where evolution_instance = $1 and ativa',
@@ -179,5 +194,15 @@ export async function gravarMensagem(
       JSON.stringify(msg.bruto),
     ],
   );
-  return inserida.rows.length > 0 ? 'gravada' : 'duplicada';
+  if (inserida.rows.length === 0) return 'duplicada';
+
+  if (msg.midia && opcoes.criarMidia !== false) {
+    // Vídeo só guarda os metadados (decisão do esquema); o resto entra na fila de download.
+    await db.query(
+      `insert into midias (workspace_id, mensagem_id, mime, bytes, nome_arquivo, estado)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [workspaceId, inserida.rows[0].id, msg.midia.mime, msg.midia.bytes, msg.midia.nomeArquivo, msg.tipo === 'video' ? 'ignorada' : 'pendente'],
+    );
+  }
+  return 'gravada';
 }

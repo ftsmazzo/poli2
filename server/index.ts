@@ -4,6 +4,7 @@ import { loadConfig } from './config';
 import { comLockTentativa, criarPool, migrarComLock } from './db';
 import { importarHistoricoPendente } from './evolution/historico';
 import { sincronizarInstancias } from './evolution/sync';
+import { LIMITES_PADRAO, processarMidiasPendentes } from './midia/processar';
 import { webhookRouter } from './webhooks';
 
 const cfg = loadConfig();
@@ -88,6 +89,28 @@ async function sincronizarEvolution(): Promise<void> {
   }
 }
 
+const LOCK_MIDIA = 8421003;
+const INTERVALO_MIDIA_MS = 20_000;
+
+// Baixa os anexos que chegaram nos grupos e, se for uma exportação de conversa, importa as mensagens.
+async function processarMidias(): Promise<void> {
+  if (!pool || !cfg.evolutionUrl || !cfg.evolutionApiKey) return;
+  const evo = { url: cfg.evolutionUrl, apiKey: cfg.evolutionApiKey };
+  try {
+    await comLockTentativa(pool, LOCK_MIDIA, async (db) => {
+      const r = await processarMidiasPendentes(db, evo, { mediaDir: cfg.mediaDir, ...LIMITES_PADRAO });
+      if (r.baixadas || r.ignoradas || r.falhas) {
+        console.log(`mídia: baixadas ${r.baixadas}; ignoradas ${r.ignoradas}; falhas ${r.falhas}`);
+      }
+      for (const e of r.exportacoes) {
+        console.log(`exportação de conversa: ${e.linhas} mensagens lidas; gravadas ${e.gravadas}; já existiam ${e.jaExistiam}`);
+      }
+    });
+  } catch (err) {
+    console.error('processamento de mídia falhou:', err instanceof Error ? err.message : err);
+  }
+}
+
 function iniciarSincronizacao(): void {
   if (!cfg.evolutionUrl || !cfg.evolutionApiKey || !cfg.webhookToken) {
     console.warn('Sincronização com a Evolution desligada: faltam EVOLUTION_URL, EVOLUTION_API_KEY ou EVOLUTION_WEBHOOK_TOKEN.');
@@ -95,6 +118,8 @@ function iniciarSincronizacao(): void {
   }
   void sincronizarEvolution();
   setInterval(() => void sincronizarEvolution(), INTERVALO_SINCRONIZACAO_MS);
+  void processarMidias();
+  setInterval(() => void processarMidias(), INTERVALO_MIDIA_MS);
 }
 
 void iniciarBanco();

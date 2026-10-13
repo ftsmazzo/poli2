@@ -18,11 +18,17 @@ export interface WebhookAtual {
 
 type Fetcher = typeof fetch;
 
-async function chamar(cfg: EvolutionCfg, f: Fetcher, caminho: string, init: RequestInit = {}): Promise<any> {
+async function chamar(
+  cfg: EvolutionCfg,
+  f: Fetcher,
+  caminho: string,
+  init: RequestInit = {},
+  timeoutMs = 15_000,
+): Promise<any> {
   const res = await f(`${cfg.url.replace(/\/+$/, '')}${caminho}`, {
     ...init,
     headers: { apikey: cfg.apiKey, 'content-type': 'application/json' },
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   // O erro leva só o status: o corpo pode ter dados da conta.
   if (!res.ok) throw new Error(`Evolution ${init.method ?? 'GET'} ${caminho} respondeu ${res.status}`);
@@ -99,6 +105,35 @@ export async function buscarMensagens(
   // Sem total de páginas na resposta: página cheia indica que pode haver mais.
   const paginas = Number(m?.pages ?? r?.pages ?? (registros.length >= porPagina ? pagina + 1 : pagina));
   return { registros, paginas };
+}
+
+export interface MidiaBaixada {
+  dados: Buffer;
+  mime: string | null;
+  nomeArquivo: string | null;
+}
+
+// Baixa o anexo de uma mensagem já recebida. Arquivos grandes demoram: timeout de 3 minutos.
+export async function baixarMidia(
+  cfg: EvolutionCfg,
+  instancia: string,
+  waMessageId: string,
+  f: Fetcher = fetch,
+): Promise<MidiaBaixada> {
+  const r = await chamar(
+    cfg,
+    f,
+    `/chat/getBase64FromMediaMessage/${encodeURIComponent(instancia)}`,
+    { method: 'POST', body: JSON.stringify({ message: { key: { id: waMessageId } }, convertToMp4: false }) },
+    180_000,
+  );
+  const base64 = typeof r?.base64 === 'string' ? r.base64.replace(/^data:[^;]*;base64,/, '') : '';
+  if (!base64) throw new Error('A Evolution não devolveu o arquivo');
+  return {
+    dados: Buffer.from(base64, 'base64'),
+    mime: typeof r.mimetype === 'string' ? r.mimetype : null,
+    nomeArquivo: typeof r.fileName === 'string' ? r.fileName : null,
+  };
 }
 
 export function eventosDoWebhook(w: WebhookAtual): string[] {

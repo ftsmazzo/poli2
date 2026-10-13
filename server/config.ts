@@ -12,6 +12,8 @@ export interface Config {
   evolutionApiKey?: string;
   // Como a Evolution enxerga este app dentro da rede do projeto (não passa pela internet).
   webhookBaseUrl: string;
+  // Volume onde os arquivos originais ficam guardados.
+  mediaDir: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -22,5 +24,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     evolutionUrl: lerEnv(env, 'EVOLUTION_URL'),
     evolutionApiKey: lerEnv(env, 'EVOLUTION_API_KEY'),
     webhookBaseUrl: lerEnv(env, 'WEBHOOK_BASE_URL') ?? 'http://poli2_app:3000',
+    mediaDir: lerEnv(env, 'MEDIA_DIR') ?? '/data/midia',
   };
 }
