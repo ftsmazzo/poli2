@@ -60,6 +60,8 @@ export interface Grupo {
   nome: string;
   acompanhar: boolean;
   intervaloMin: number;
+  /** Grupo onde a Poli avisa os Heads (além do privado de cada Head). */
+  grupoDosHeads: boolean;
   ultimaLeituraEm: string | null;
   historicoImportadoEm: string | null;
   mensagens: number;
@@ -96,6 +98,8 @@ export interface Diagnostico {
   fontes: { id: number; nome: string; ativa: boolean; status: StatusFonte; ultimoTesteEm: string | null; ultimoErro: string | null; latenciaMs: number | null }[];
   midias: { pendentes: number; falhas: number };
   extracaoPendente: number;
+  /** Opcional: servidores mais antigos não mandam. */
+  alertas?: { pendentesDeEnvio: number; falhasDeEnvio: number; semDestino: number; gruposAcompanhados: number };
   ultimosTurnos: { quando: string; pergunta: string | null; ferramentas: unknown; latenciaMs: number | null; respondido: boolean }[];
 }
 
@@ -246,7 +250,7 @@ export const api = {
     chamar<{ ok: true }>('PATCH', `/fontes/${id}/ferramentas/${enc(nome)}`, { corpo: { ativa } }),
 
   grupos: () => chamar<Grupo[]>('GET', '/grupos'),
-  editarGrupo: (id: number, d: { acompanhar?: boolean; intervaloMin?: number }) => chamar<{ ok: true }>('PATCH', `/grupos/${id}`, { corpo: d }),
+  editarGrupo: (id: number, d: { acompanhar?: boolean; intervaloMin?: number; grupoDosHeads?: boolean }) => chamar<{ ok: true }>('PATCH', `/grupos/${id}`, { corpo: d }),
 
   pessoas: () => chamar<Pessoa[]>('GET', '/pessoas'),
   editarPessoa: (id: number, d: PessoaPatch) => chamar<{ ok: true }>('PATCH', `/pessoas/${id}`, { corpo: d }),

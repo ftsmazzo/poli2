@@ -248,6 +248,19 @@ describe('API do painel', () => {
       expect((await chamar('/grupos/1', { metodo: 'PATCH', cookie, corpo: { acompanhar: true } })).status).toBe(200);
     });
 
+    it('só o administrador escolhe o Grupo dos Heads; o Head comum não', async () => {
+      const cookie = await entrar(1);
+      await db.query(`insert into grupos (workspace_id, jid, nome) values (1, '1@g.us', 'IE'), (1, '2@g.us', 'Heads')`);
+      expect((await chamar('/grupos/2', { metodo: 'PATCH', cookie, corpo: { grupoDosHeads: true } })).status).toBe(200);
+      const g = (await chamar('/grupos', { cookie })).corpo;
+      expect(g.find((x: any) => x.nome === 'Heads').grupoDosHeads).toBe(true);
+      expect(g.find((x: any) => x.nome === 'IE').grupoDosHeads).toBe(false);
+
+      await db.query(`update usuario_workspaces set papel = 'head'`);
+      expect((await chamar('/grupos/1', { metodo: 'PATCH', cookie, corpo: { grupoDosHeads: true } })).status).toBe(403);
+      expect((await chamar('/grupos/1', { metodo: 'PATCH', cookie, corpo: { acompanhar: true } })).status).toBe(200);
+    });
+
     it('o admin define papel e quem pode comandar; o telefone é guardado só com dígitos', async () => {
       const cookie = await entrar(1);
       await db.query(`insert into pessoas (workspace_id, nome, papel) values (1, 'Fulano', 'outro')`);
@@ -272,6 +285,17 @@ describe('API do painel', () => {
       expect(d.extracaoPendente).toBe(1);
       expect(d.ultimosTurnos[0]).toMatchObject({ pergunta: 'link do plano', ferramentas: ['buscar_itens'], respondido: true });
       expect(JSON.stringify(d)).not.toContain('5596900000000');
+    });
+
+    it('mostra os alertas esperando envio, os que desistiram e os que ficaram sem destino', async () => {
+      const cookie = await entrar(1);
+      await db.query(`insert into grupos (workspace_id, jid, nome, acompanhar) values (1, '1@g.us', 'IE', true)`);
+      await db.query(`insert into alertas (workspace_id, grupo_id, severidade, texto, dedupe_key) values (1, 1, 3, 'a', 'k1'), (1, 1, 2, 'b', 'k2')`);
+      await db.query(`insert into mensagens_saida (workspace_id, destino_jid, destino_tipo, origem, alerta_id, texto, estado)
+        values (1, '5516996480805', 'privado', 'alerta', 1, 'x', 'pendente'), (1, '5596999990002', 'privado', 'alerta', 1, 'x', 'falhou')`);
+      const d = (await chamar('/diagnostico', { cookie })).corpo;
+      // O alerta 2 não tem nenhuma mensagem de saída: ficou sem destino.
+      expect(d.alertas).toEqual({ pendentesDeEnvio: 1, falhasDeEnvio: 1, semDestino: 1, gruposAcompanhados: 1 });
     });
 
     it('lista alertas do tenant (vazio por enquanto)', async () => {

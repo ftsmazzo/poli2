@@ -100,6 +100,22 @@ export function DiagnosticoPagina() {
                 <dd>{numero(d.extracaoPendente)} mensagens</dd>
               </dl>
             </section>
+
+            {d.alertas && (
+              <section className="cartao" aria-labelledby="d-alertas">
+                <h2 id="d-alertas">Alertas aos Heads</h2>
+                <dl className="lista-def">
+                  <dt>Grupos acompanhados</dt>
+                  <dd>{numero(d.alertas.gruposAcompanhados)}</dd>
+                  <dt>Envios esperando</dt>
+                  <dd>{numero(d.alertas.pendentesDeEnvio)}</dd>
+                  <dt>Alertas sem destino</dt>
+                  <dd>{numero(d.alertas.semDestino)}</dd>
+                  <dt>Envios que falharam</dt>
+                  <dd>{numero(d.alertas.falhasDeEnvio)}</dd>
+                </dl>
+              </section>
+            )}
           </div>
 
           <section className="cartao" aria-labelledby="d-fontes">

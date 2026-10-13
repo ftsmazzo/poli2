@@ -62,7 +62,12 @@ const esquemaFontePatch = z.object({
   quandoUsar: z.string().max(500).optional(),
   ativa: z.boolean().optional(),
 });
-const esquemaGrupoPatch = z.object({ acompanhar: z.boolean().optional(), intervaloMin: z.number().int().min(5).max(1440).optional() });
+const esquemaGrupoPatch = z.object({
+  acompanhar: z.boolean().optional(),
+  intervaloMin: z.number().int().min(5).max(1440).optional(),
+  // Grupo onde a Poli avisa os Heads. Só o administrador escolhe: define para onde vão os alertas.
+  grupoDosHeads: z.boolean().optional(),
+});
 const esquemaPessoaPatch = z.object({
   nome: z.string().trim().max(120).optional(),
   telefone: z.string().max(30).optional(),
@@ -302,7 +307,7 @@ export function painelRouter(deps: DepsApi): Router {
 
   r.get('/grupos', exigir(), async (_req, res) => {
     const g = await db.query(
-      `select g.id, g.jid, g.nome, g.acompanhar, g.intervalo_min, g.ultima_leitura_em, g.historico_importado_em,
+      `select g.id, g.jid, g.nome, g.acompanhar, g.intervalo_min, g.ultima_leitura_em, g.historico_importado_em, g.eh_heads,
               (select count(*)::int from mensagens m where m.grupo_id = g.id) as mensagens,
               (select max(m.enviada_em) from mensagens m where m.grupo_id = g.id) as ultima_mensagem_em
        from grupos g where g.workspace_id = $1 order by ultima_mensagem_em desc nulls last, g.id`,
@@ -314,6 +319,7 @@ export function painelRouter(deps: DepsApi): Router {
         nome: x.nome ?? x.jid,
         acompanhar: x.acompanhar,
         intervaloMin: x.intervalo_min,
+        grupoDosHeads: x.eh_heads,
         ultimaLeituraEm: x.ultima_leitura_em,
         historicoImportadoEm: x.historico_importado_em,
         mensagens: x.mensagens,
@@ -337,6 +343,14 @@ export function painelRouter(deps: DepsApi): Router {
     if (p.data.intervaloMin !== undefined) {
       params.push(p.data.intervaloMin);
       sets.push(`intervalo_min = $${params.length}`);
+    }
+    if (p.data.grupoDosHeads !== undefined) {
+      if (ctx(res).papel !== 'admin') {
+        res.status(403).json({ erro: 'so_administrador' });
+        return;
+      }
+      params.push(p.data.grupoDosHeads);
+      sets.push(`eh_heads = $${params.length}`);
     }
     if (sets.length === 0) {
       res.status(400).json({ erro: 'nada_para_mudar' });
@@ -418,7 +432,7 @@ export function painelRouter(deps: DepsApi): Router {
   r.get('/diagnostico', exigir(), async (_req, res) => {
     const ws = ctx(res).workspaceId;
     const um = async (sql: string) => (await db.query(sql, [ws])).rows[0];
-    const [totais, inst, midias, pendentes, turnos] = await Promise.all([
+    const [totais, inst, midias, pendentes, turnos, alertas] = await Promise.all([
       um(`select (select count(*)::int from mensagens where workspace_id = $1) as mensagens,
                  (select count(*)::int from itens where workspace_id = $1) as itens,
                  (select count(*)::int from grupos where workspace_id = $1) as grupos,
@@ -431,6 +445,13 @@ export function painelRouter(deps: DepsApi): Router {
         `select criado_em, pergunta, tools, latencia_ms, resposta from turnos where workspace_id = $1 order by criado_em desc limit 10`,
         [ws],
       ),
+      // Alertas: envios esperando, envios que desistiram e alertas recentes que não tinham para quem ir.
+      um(`select
+            (select count(*) from mensagens_saida where workspace_id = $1 and origem = 'alerta' and estado = 'pendente')::int as pendentes_de_envio,
+            (select count(*) from mensagens_saida where workspace_id = $1 and origem = 'alerta' and estado = 'falhou')::int as falhas_de_envio,
+            (select count(*) from alertas a where a.workspace_id = $1 and a.enviado_em is null and a.criado_em > now() - interval '24 hours'
+               and not exists (select 1 from mensagens_saida m where m.alerta_id = a.id))::int as sem_destino,
+            (select count(*) from grupos where workspace_id = $1 and acompanhar)::int as grupos_acompanhados`),
     ]);
     res.json({
       instancia: inst
@@ -440,6 +461,12 @@ export function painelRouter(deps: DepsApi): Router {
       fontes: (await listarFontes(ws)).map((f) => ({ id: f.id, nome: f.nome, ativa: f.ativa, status: f.status, ultimoTesteEm: f.ultimoTesteEm, ultimoErro: f.ultimoErro, latenciaMs: f.latenciaMs })),
       midias,
       extracaoPendente: pendentes.n,
+      alertas: {
+        pendentesDeEnvio: alertas.pendentes_de_envio,
+        falhasDeEnvio: alertas.falhas_de_envio,
+        semDestino: alertas.sem_destino,
+        gruposAcompanhados: alertas.grupos_acompanhados,
+      },
       ultimosTurnos: turnos.rows.map((t) => ({ quando: t.criado_em, pergunta: t.pergunta, ferramentas: t.tools, latenciaMs: t.latencia_ms, respondido: t.resposta !== null })),
     });
   });

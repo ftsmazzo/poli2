@@ -11,7 +11,7 @@ describe('migrate', () => {
   it('aplica o schema e é idempotente', async () => {
     const db = await novoBanco();
     const primeira = await migrate(db);
-    expect(primeira).toEqual(['001_core.sql', '002_painel_midia_saida.sql', '003_instancia_unica.sql', '004_historico_grupo.sql', '005_midia_exportacao.sql', '006_fila_midia_anexos_antigos.sql', '007_extracao_itens.sql', '008_pedidos_agente.sql', '009_lids.sql', '010_nome_perfil.sql', '011_painel_login.sql']);
+    expect(primeira).toEqual(['001_core.sql', '002_painel_midia_saida.sql', '003_instancia_unica.sql', '004_historico_grupo.sql', '005_midia_exportacao.sql', '006_fila_midia_anexos_antigos.sql', '007_extracao_itens.sql', '008_pedidos_agente.sql', '009_lids.sql', '010_nome_perfil.sql', '011_painel_login.sql', '012_grupo_dos_heads.sql']);
     expect(await migrate(db)).toEqual([]);
   });
 

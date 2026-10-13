@@ -20,8 +20,8 @@ export function Grupos() {
   const [aviso, setAviso] = useState<string | null>(null);
 
   // Salva ao mudar: atualiza a tela na hora e desfaz se o servidor recusar.
-  async function mudar(g: Grupo, patch: { acompanhar?: boolean; intervaloMin?: number }) {
-    const antes = { acompanhar: g.acompanhar, intervaloMin: g.intervaloMin };
+  async function mudar(g: Grupo, patch: { acompanhar?: boolean; intervaloMin?: number; grupoDosHeads?: boolean }) {
+    const antes = { acompanhar: g.acompanhar, intervaloMin: g.intervaloMin, grupoDosHeads: g.grupoDosHeads };
     setAviso(null);
     definir((l) => l && l.map((x) => (x.id === g.id ? { ...x, ...patch } : x)));
     try {
@@ -40,7 +40,7 @@ export function Grupos() {
           Atualizar
         </button>
       </div>
-      <p className="ajuda">Ligue &quot;Acompanhar&quot; para a Poli ler o grupo de tempos em tempos, resumir e alertar os Heads quando algo for importante. As mudanças são salvas na hora.</p>
+      <p className="ajuda">Ligue &quot;Acompanhar&quot; para a Poli ler o grupo de tempos em tempos, resumir e alertar os Heads quando algo for importante. Ao ligar, ela começa do que chegar dali em diante, sem analisar o histórico. Os alertas vão para o privado de cada pessoa marcada como Head em Pessoas e para o grupo marcado como &quot;Grupo dos Heads&quot; (só o administrador escolhe). As mudanças são salvas na hora.</p>
       {aviso && <Aviso aoFechar={() => setAviso(null)}>{aviso}</Aviso>}
       {carregando && !dados && <Carregando />}
       {erro && <ErroCarga mensagem={erro} aoTentar={recarregar} />}
@@ -63,6 +63,7 @@ export function Grupos() {
                   <th scope="col">Histórico importado</th>
                   <th scope="col">Acompanhar</th>
                   <th scope="col">Intervalo de leitura</th>
+                  <th scope="col">Grupo dos Heads</th>
                 </tr>
               </thead>
               <tbody>
@@ -89,6 +90,9 @@ export function Grupos() {
                             </option>
                           ))}
                         </select>
+                      </td>
+                      <td>
+                        <Switch rotulo={`Usar o grupo ${g.nome} como Grupo dos Heads, que recebe os alertas`} checked={g.grupoDosHeads} onChange={(v) => void mudar(g, { grupoDosHeads: v })} />
                       </td>
                     </tr>
                   );

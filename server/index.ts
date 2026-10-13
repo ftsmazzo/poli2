@@ -7,6 +7,8 @@ import { comLockTentativa, criarPool, migrarComLock } from './db';
 import { importarHistoricoPendente } from './evolution/historico';
 import { descobrirIdentificadores } from './evolution/lids';
 import { sincronizarInstancias } from './evolution/sync';
+import { enviarPendentes, reprocessarSemDestino } from './alertas/envio';
+import { lerGruposVencidos } from './alertas/leitura';
 import { criarChatOpenRouter } from './agente/llm';
 import { avaliarPedido } from './agente/pedido';
 import { responderPedido } from './agente/turno';
@@ -229,6 +231,43 @@ async function extrairItens(): Promise<void> {
   }
 }
 
+const LOCK_LEITURA = 8421005;
+const INTERVALO_LEITURA_MS = 60_000;
+
+// A cada minuto, lê os grupos acompanhados cujo intervalo venceu: resume, dá nota e cria alertas.
+async function lerGrupos(): Promise<void> {
+  if (!pool || !cfg.openrouterKey) return;
+  const chat = criarChatOpenRouter(cfg.openrouterKey);
+  try {
+    await comLockTentativa(pool, LOCK_LEITURA, async (db) => {
+      const r = await lerGruposVencidos(db, chat, cfg.modeloOrquestrador);
+      if (r.lidos || r.alertas || r.falhas || r.inicios) {
+        console.log(`leitura de grupos: ${r.lidos} lido(s); ${r.inicios} iniciado(s); alertas criados: ${r.alertas}; falhas: ${r.falhas}`);
+      }
+    });
+  } catch (err) {
+    console.error('leitura de grupos falhou:', err instanceof Error ? err.message : err);
+  }
+}
+
+const LOCK_ENVIO = 8421006;
+const INTERVALO_ENVIO_MS = 30_000;
+
+// A cada 30 segundos, manda os alertas pendentes aos Heads (privado e Grupo dos Heads).
+async function enviarAlertas(): Promise<void> {
+  if (!pool || !cfg.evolutionUrl || !cfg.evolutionApiKey) return;
+  const evo = { url: cfg.evolutionUrl, apiKey: cfg.evolutionApiKey };
+  try {
+    await comLockTentativa(pool, LOCK_ENVIO, async (db) => {
+      await reprocessarSemDestino(db);
+      const r = await enviarPendentes(db, (inst, destino, texto) => enviarTexto(evo, inst, destino, texto));
+      if (r.enviadas || r.falhas) console.log(`alertas: ${r.enviadas} enviado(s); ${r.falhas} falha(s); ${r.adiadas} adiado(s)`);
+    });
+  } catch (err) {
+    console.error('envio de alertas falhou:', err instanceof Error ? err.message : err);
+  }
+}
+
 function iniciarSincronizacao(): void {
   // A extração só depende do banco, não da Evolution.
   // Estado do agente ao subir: só nomes de variáveis que faltam e contagens, nunca valores.
@@ -242,6 +281,8 @@ function iniciarSincronizacao(): void {
   );
   void extrairItens();
   setInterval(() => void extrairItens(), INTERVALO_EXTRACAO_MS);
+  void lerGrupos();
+  setInterval(() => void lerGrupos(), INTERVALO_LEITURA_MS);
   if (!cfg.evolutionUrl || !cfg.evolutionApiKey || !cfg.webhookToken) {
     console.warn('Sincronização com a Evolution desligada: faltam EVOLUTION_URL, EVOLUTION_API_KEY ou EVOLUTION_WEBHOOK_TOKEN.');
     return;
@@ -250,6 +291,8 @@ function iniciarSincronizacao(): void {
   setInterval(() => void sincronizarEvolution(), INTERVALO_SINCRONIZACAO_MS);
   void processarMidias();
   setInterval(() => void processarMidias(), INTERVALO_MIDIA_MS);
+  void enviarAlertas();
+  setInterval(() => void enviarAlertas(), INTERVALO_ENVIO_MS);
 }
 
 void iniciarBanco();

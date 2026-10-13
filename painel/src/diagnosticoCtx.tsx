@@ -24,5 +24,11 @@ export function problemasDoDiagnostico(d: Diagnostico): string[] {
   for (const f of d.fontes) {
     if (f.ativa && f.status === 'erro') p.push(`A Fonte "${f.nome}" está com erro${f.ultimoErro ? `: ${f.ultimoErro}` : '.'}`);
   }
+  if (d.alertas && d.alertas.semDestino > 0) {
+    p.push('Há alerta recente que não foi enviado porque não tem para quem ir: marque pelo menos um Head com telefone em Pessoas, ou escolha o Grupo dos Heads em Grupos.');
+  }
+  if (d.alertas && d.alertas.falhasDeEnvio > 0) {
+    p.push(`${d.alertas.falhasDeEnvio} envio(s) de alerta aos Heads falharam (o WhatsApp recusou depois de 3 tentativas).`);
+  }
   return p;
 }
