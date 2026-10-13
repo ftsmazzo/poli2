@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import express, { Router } from 'express';
 import type { Db } from './migrate';
-import { extrairMensagem, gravarMensagem, normalizarEvento } from './ingest/evolution';
+import { extrairMensagem, gravarMensagem, normalizarEvento, type MensagemNormalizada } from './ingest/evolution';
 
 // Compara os hashes, não os textos: tempo constante e sem exigir o mesmo tamanho.
 function tokenValido(recebido: string, esperado: string): boolean {
@@ -9,7 +9,11 @@ function tokenValido(recebido: string, esperado: string): boolean {
   return timingSafeEqual(h(recebido), h(esperado));
 }
 
-export function webhookRouter(getDb: () => Db | undefined, token: string | undefined): Router {
+// Chamado depois que uma mensagem NOVA foi gravada (nunca para reenvio). Roda sem bloquear a resposta
+// ao webhook: responder um pedido pode demorar, e a Evolution reenviaria se o webhook ficasse esperando.
+export type AoGravar = (instancia: string, msg: MensagemNormalizada) => Promise<void>;
+
+export function webhookRouter(getDb: () => Db | undefined, token: string | undefined, aoGravar?: AoGravar): Router {
   const router = Router();
 
   router.post('/evolution/:instancia', express.json({ limit: '15mb' }), async (req, res) => {
@@ -44,7 +48,14 @@ export function webhookRouter(getDb: () => Db | undefined, token: string | undef
           continue;
         }
         const r = await gravarMensagem(db, req.params.instancia, msg);
-        if (r === 'gravada') resumo.gravadas++;
+        if (r === 'gravada') {
+          resumo.gravadas++;
+          if (aoGravar) {
+            void aoGravar(req.params.instancia, msg).catch((err) =>
+              console.error('processamento após a gravação falhou:', err instanceof Error ? err.message : err),
+            );
+          }
+        }
         else if (r === 'duplicada') resumo.duplicadas++;
         else resumo.instancia_desconhecida++;
       }

@@ -4,6 +4,12 @@ import { loadConfig } from './config';
 import { comLockTentativa, criarPool, migrarComLock } from './db';
 import { importarHistoricoPendente } from './evolution/historico';
 import { sincronizarInstancias } from './evolution/sync';
+import { criarChatOpenRouter } from './agente/llm';
+import { avaliarPedido } from './agente/pedido';
+import { responderPedido } from './agente/turno';
+import { enviarTexto } from './evolution/client';
+import type { MensagemNormalizada } from './ingest/evolution';
+import type { Db } from './migrate';
 import { extrairItensPendentes } from './extrair/persistir';
 import { LIMITES_PADRAO, processarMidiasPendentes } from './midia/processar';
 import { webhookRouter } from './webhooks';
@@ -28,7 +34,32 @@ app.get('/health', async (_req, res) => {
   res.json({ ok: true, db });
 });
 
-app.use('/webhooks', webhookRouter(() => (bancoPronto ? pool : undefined), cfg.webhookToken));
+// Pedido feito à Poli no grupo: reconhece, confere quem pediu, busca, redige e responde.
+async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<void> {
+  if (!pool || !bancoPronto || !cfg.openrouterKey || !cfg.evolutionUrl || !cfg.evolutionApiKey) return;
+  const db = pool as unknown as Db;
+  const avaliacao = await avaliarPedido(db, instancia, msg, cfg.comandantes);
+  if (avaliacao.tipo === 'nao_autorizado') {
+    // Sem resposta e sem número no log: só o tipo do identificador, para diagnosticar.
+    console.log(`pedido ignorado: autor não autorizado (${avaliacao.detalhe})`);
+    return;
+  }
+  if (avaliacao.tipo !== 'pedido') return;
+
+  const evo = { url: cfg.evolutionUrl, apiKey: cfg.evolutionApiKey };
+  const situacao = await responderPedido(
+    {
+      db,
+      chat: criarChatOpenRouter(cfg.openrouterKey),
+      modelos: { orquestrador: cfg.modeloOrquestrador, redatora: cfg.modeloRedatora },
+      enviar: (inst, jid, texto) => enviarTexto(evo, inst, jid, texto),
+    },
+    avaliacao.pedido,
+  );
+  console.log(`pedido ${situacao}`);
+}
+
+app.use('/webhooks', webhookRouter(() => (bancoPronto ? pool : undefined), cfg.webhookToken, aoGravar));
 
 app.listen(cfg.port, () => {
   console.log(`poli2 ouvindo na porta ${cfg.port}`);

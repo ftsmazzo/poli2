@@ -43,10 +43,16 @@ export async function sincronizarInstancias(
   const instancias = await listarInstancias(evo, f);
   resultado.instancias = instancias.length;
 
-  for (const { nome } of instancias) {
+  for (const { nome, jid } of instancias) {
     // Uma instância com problema não pode travar as outras.
     try {
       if (await garantirTenant(db, nome)) resultado.tenantsCriados.push(nome);
+      if (jid) {
+        await db.query(
+          'update instancias_wa set jid_proprio = $2 where evolution_instance = $1 and jid_proprio is distinct from $2',
+          [nome, jid],
+        );
+      }
 
       const url = `${opcoes.webhookBase.replace(/\/+$/, '')}/webhooks/evolution/${encodeURIComponent(nome)}`;
       const atual = await lerWebhook(evo, nome, f);

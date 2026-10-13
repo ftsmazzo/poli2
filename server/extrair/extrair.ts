@@ -205,8 +205,9 @@ export function extrairContatosVcard(texto: string): ItemExtraido[] {
 const NUMERO = '(?:\\d{1,5}[a-z]?|s\\/n)';
 // Bairro e cidade depois do número: até 3 palavras por trecho, sem conjunção nem começo de link,
 // para não engolir o resto da frase ("... 10 - Centro e depois ...").
-const PARAR = '(?:e|ou|que|para|pra|com|em|na|no|nos|nas|se|mas|http|https|www)';
-const PALAVRA = `(?!${PARAR}\\b)\\p{L}+`;
+// (\b do JavaScript não enxerga letra acentuada como parte da palavra, por isso o lookahead de letra.)
+const PARAR = '(?:e|ou|que|para|pra|com|em|na|no|nos|nas|se|mas|a|o|as|os|às|ate|até|depois|antes|quando|onde|hoje|amanha|amanhã|http|https|www)';
+const PALAVRA = `(?!${PARAR}(?!\\p{L}))\\p{L}+`;
 const RESTO = `(?:\\s*[,–-]\\s*${PALAVRA}(?: ${PALAVRA}){0,2}){0,2}`;
 const ENDERECO_RE = new RegExp(
   `\\b(?:rua|r\\.|avenida|av\\.?|travessa|tv\\.|alameda|rodovia|rod\\.|estrada|pra[çc]a|largo|passagem|beco)\\s+[\\p{L}0-9ºª°'. -]{2,50}?(?<sep>\\s*,\\s*|\\s+(?:n[ºo°.]*\\s*)?)(?<num>${NUMERO})\\b${RESTO}(?:\\s*[,–-]?\\s*(?:cep\\s*)?\\d{5}-?\\d{3})?`,

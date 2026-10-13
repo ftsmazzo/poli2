@@ -8,6 +8,8 @@ export interface EvolutionCfg {
 export interface InstanciaEvo {
   nome: string;
   status: string | null;
+  // Número da própria instância (o da Poli), usado para saber quando ela é marcada.
+  jid: string | null;
 }
 
 export interface WebhookAtual {
@@ -44,6 +46,7 @@ export async function listarInstancias(cfg: EvolutionCfg, f: Fetcher = fetch): P
     .map((i) => ({
       nome: String(i?.name ?? i?.instanceName ?? i?.instance?.instanceName ?? ''),
       status: (i?.connectionStatus ?? i?.instance?.status ?? null) as string | null,
+      jid: (i?.ownerJid ?? i?.owner ?? i?.instance?.owner ?? null) as string | null,
     }))
     .filter((i) => i.nome !== '');
 }
@@ -105,6 +108,21 @@ export async function buscarMensagens(
   // Sem total de páginas na resposta: página cheia indica que pode haver mais.
   const paginas = Number(m?.pages ?? r?.pages ?? (registros.length >= porPagina ? pagina + 1 : pagina));
   return { registros, paginas };
+}
+
+// Envia uma mensagem de texto para um grupo (ou pessoa).
+export async function enviarTexto(
+  cfg: EvolutionCfg,
+  instancia: string,
+  destino: string,
+  texto: string,
+  f: Fetcher = fetch,
+): Promise<{ waMessageId: string | null }> {
+  const r = await chamar(cfg, f, `/message/sendText/${encodeURIComponent(instancia)}`, {
+    method: 'POST',
+    body: JSON.stringify({ number: destino, text: texto }),
+  });
+  return { waMessageId: typeof r?.key?.id === 'string' ? r.key.id : null };
 }
 
 export interface MidiaBaixada {

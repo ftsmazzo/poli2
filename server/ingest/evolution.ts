@@ -22,6 +22,14 @@ export interface MensagemNormalizada {
   citadaWaId: string | null;
   // Anexo da mensagem (imagem, áudio, documento, vídeo), se houver.
   midia: { nomeArquivo: string | null; mime: string | null; bytes: number | null } | null;
+  // Mensagem enviada pelo próprio número da Poli (nunca é um pedido).
+  fromMe: boolean;
+  // Número real do autor quando o WhatsApp mostra o autor como LID (identificador interno).
+  autorAlt: string | null;
+  // Quem foi marcado com @ na mensagem.
+  mencionados: string[];
+  // Autor da mensagem que esta respondeu.
+  citadaAutor: string | null;
   bruto: unknown;
 }
 
@@ -100,6 +108,14 @@ function semBase64(v: unknown): unknown {
   return v;
 }
 
+// Marcações (@) e respostas ficam no contextInfo, que muda de lugar conforme o tipo de mensagem.
+function contextInfoDe(m: Record<string, any>, data: any): Record<string, any> | null {
+  for (const v of Object.values(m)) {
+    if (v && typeof v === 'object' && (v as any).contextInfo) return (v as any).contextInfo;
+  }
+  return data?.contextInfo ?? null;
+}
+
 function infoMidia(m: Record<string, any>): MensagemNormalizada['midia'] {
   const x = m.imageMessage ?? m.audioMessage ?? m.documentMessage ?? m.videoMessage;
   if (!x) return null;
@@ -124,6 +140,7 @@ export function extrairMensagem(data: any): MensagemNormalizada | null {
   if (!message) return null;
   const c = conteudo(message);
   if (!c) return null;
+  const ctx = contextInfoDe(message, data);
 
   return {
     waMessageId: key.id,
@@ -135,6 +152,11 @@ export function extrairMensagem(data: any): MensagemNormalizada | null {
     texto: c.texto,
     citadaWaId: c.citada,
     midia: infoMidia(message),
+    fromMe: Boolean(key.fromMe),
+    autorAlt:
+      typeof key.participantAlt === 'string' ? key.participantAlt : typeof data.participantAlt === 'string' ? data.participantAlt : null,
+    mencionados: ctx && Array.isArray(ctx.mentionedJid) ? ctx.mentionedJid.map(String) : [],
+    citadaAutor: ctx && typeof ctx.participant === 'string' ? ctx.participant : null,
     bruto: semBase64(data),
   };
 }

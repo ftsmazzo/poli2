@@ -1,0 +1,114 @@
+import type { Db } from '../migrate';
+import { criarFerramentas } from './ferramentas';
+import { aplicarGates } from './gates';
+import type { Chat, MensagemChat } from './llm';
+import type { Pedido } from './pedido';
+import { promptOrquestrador, promptRedatora } from './prompts';
+
+export interface DepsTurno {
+  db: Db;
+  chat: Chat;
+  modelos: { orquestrador: string; redatora: string };
+  enviar: (instancia: string, grupoJid: string, texto: string) => Promise<{ waMessageId: string | null }>;
+  agora?: () => Date;
+}
+
+const MAX_PASSOS = 6;
+const MAX_RESULTADO = 15_000;
+const MAX_EVIDENCIA = 60_000;
+const FALHA = 'Não consegui responder agora. Tenta de novo em instantes.';
+
+export type SituacaoTurno = 'respondido' | 'duplicado' | 'erro';
+
+// Um pedido, do início ao fim: busca (modelo barato com ferramentas), redação (modelo melhor, só com as
+// evidências), trava de segurança, envio e registro. O mesmo pedido nunca é respondido duas vezes.
+export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<SituacaoTurno> {
+  const { db } = deps;
+  const inicio = Date.now();
+
+  const novo = await db.query(
+    `insert into turnos (workspace_id, grupo_id, pergunta, wa_message_id)
+     values ($1, (select id from grupos where workspace_id = $1 and jid = $2), $3, $4)
+     on conflict (workspace_id, wa_message_id) where wa_message_id is not null do nothing
+     returning id`,
+    [p.workspaceId, p.grupoJid, p.consulta, p.waMessageId],
+  );
+  if (novo.rows.length === 0) return 'duplicado';
+  const turnoId = novo.rows[0].id as number;
+
+  const usadas: string[] = [];
+  let situacao: SituacaoTurno = 'respondido';
+  let resposta: string;
+
+  try {
+    const ferramentas = criarFerramentas(db, p.workspaceId);
+    const agora = (deps.agora?.() ?? new Date()).toLocaleString('pt-BR', {
+      timeZone: 'America/Belem',
+      dateStyle: 'full',
+      timeStyle: 'short',
+    });
+
+    const conversa: MensagemChat[] = [
+      { role: 'system', content: promptOrquestrador(agora) },
+      { role: 'user', content: `Pedido de ${p.autorNome ?? 'alguém'} no grupo "${p.grupoNome ?? p.grupoJid}": ${p.consulta}` },
+    ];
+    const evidencias: string[] = [];
+    let notas = '';
+
+    for (let passo = 0; passo < MAX_PASSOS; passo++) {
+      const r = await deps.chat({ model: deps.modelos.orquestrador, messages: conversa, tools: ferramentas.specs });
+      if (r.toolCalls.length === 0) {
+        notas = r.content ?? '';
+        break;
+      }
+      conversa.push({ role: 'assistant', content: r.content, tool_calls: r.toolCalls });
+      for (const chamada of r.toolCalls) {
+        usadas.push(chamada.function.name);
+        const saida = JSON.stringify(await ferramentas.executar(chamada.function.name, chamada.function.arguments)).slice(0, MAX_RESULTADO);
+        evidencias.push(saida);
+        conversa.push({ role: 'tool', tool_call_id: chamada.id, content: saida });
+      }
+    }
+
+    const evidencia = evidencias.join('\n').slice(0, MAX_EVIDENCIA);
+    const redacao = await deps.chat({
+      model: deps.modelos.redatora,
+      messages: [
+        { role: 'system', content: promptRedatora() },
+        {
+          role: 'user',
+          content: `Pedido: ${p.consulta}\n\nNotas da busca:\n${notas || '(sem notas)'}\n\nEvidências:\n${evidencia || '(nenhuma busca devolveu resultado)'}`,
+        },
+      ],
+    });
+    resposta = aplicarGates(redacao.content ?? '', evidencia);
+  } catch (err) {
+    situacao = 'erro';
+    resposta = FALHA;
+    // Só a mensagem do erro: nunca o pedido nem o conteúdo das conversas.
+    console.error('turno falhou:', err instanceof Error ? err.message : err);
+  }
+
+  try {
+    const enviada = await deps.enviar(p.instancia, p.grupoJid, resposta);
+    await db.query(
+      `insert into mensagens_saida (workspace_id, destino_jid, destino_tipo, origem, texto, estado, wa_message_id, enviada_em)
+       values ($1, $2, 'grupo', 'resposta', $3, 'enviada', $4, now())`,
+      [p.workspaceId, p.grupoJid, resposta, enviada.waMessageId],
+    );
+  } catch (err) {
+    situacao = 'erro';
+    console.error('envio da resposta falhou:', err instanceof Error ? err.message : err);
+    await db.query(
+      `insert into mensagens_saida (workspace_id, destino_jid, destino_tipo, origem, texto, estado, tentativas)
+       values ($1, $2, 'grupo', 'resposta', $3, 'falhou', 1)`,
+      [p.workspaceId, p.grupoJid, resposta],
+    );
+  }
+
+  await db.query(
+    `update turnos set tools = $2::jsonb, resposta = $3, modelo = $4, latencia_ms = $5 where id = $1`,
+    [turnoId, JSON.stringify(usadas), resposta, deps.modelos.redatora, Date.now() - inicio],
+  );
+  return situacao;
+}

@@ -117,10 +117,16 @@ describe('extrairEnderecos', () => {
     expect(extrairEnderecos('fica na Rua 7 de Setembro, 100')[0].valor).toBe('Rua 7 de Setembro, 100');
   });
 
+  it('para a cidade antes de "às", "até" e outras palavras que já são da frase', () => {
+    expect(extrairEnderecos('Reunião no endereço Rua das Flores, 10 - Centro, Macapá às 15h')[0].valor).toBe('Rua das Flores, 10 - Centro, Macapá');
+    expect(extrairEnderecos('Rua Santos Dumont, 5 - Centro até sexta')[0].valor).toBe('Rua Santos Dumont, 5 - Centro');
+  });
+
   it('lê CEP sozinho e não repete o CEP que já está no endereço', () => {
     expect(extrairEnderecos('CEP 68900-000')[0]).toMatchObject({ valor: 'CEP 68900-000' });
-    const e = extrairEnderecos('Rua A, 5 - Centro, 68900-000');
+    const e = extrairEnderecos('Rua das Palmeiras, 5 - Centro, 68900-000');
     expect(e).toHaveLength(1);
+    expect(e[0].valor).toBe('Rua das Palmeiras, 5 - Centro, 68900-000');
   });
 
   it('não trata ano ou frase comum como endereço', () => {
