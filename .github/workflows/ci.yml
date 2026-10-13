@@ -15,3 +15,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm ci --prefix painel
+      - run: npm run typecheck --prefix painel
+      - run: npm test --prefix painel
+      - run: npm run build --prefix painel

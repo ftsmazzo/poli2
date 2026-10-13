@@ -53,7 +53,7 @@ Fluxo de erro/exceção: se o envio falha, o alerta fica pendente no painel e é
 
 Perfil: admin e Head.
 
-1. Entra no painel (login).
+1. Entra no painel: escreve "painel" para a Poli no grupo, e ela manda um link de acesso no privado (uso único, 15 minutos).
 2. Em Fontes, cadastra uma Fonte (URL do MCP, RAG ou agenda), escreve "quando usar" e define o escopo (papéis e grupos).
 3. Clica em "Testar": o painel lista as tools descobertas e mostra o status (ok ou erro) e a latência.
 4. Liga ou desliga cada tool. Tools de escrita vêm desligadas.

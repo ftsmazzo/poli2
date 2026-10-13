@@ -32,6 +32,11 @@ export async function guardarPar(db: Db, workspaceId: number, lid: string, telef
      on conflict (workspace_id, lid) do update set telefone = excluded.telefone, atualizado_em = now()`,
     [workspaceId, lid, telefone],
   );
+  // Quem já está cadastrado só pelo LID ganha o telefone: o painel mostra e a autorização usa.
+  await db.query(
+    `update pessoas set telefone = $3 where workspace_id = $1 and jid = $2 || '@lid' and telefone is null`,
+    [workspaceId, lid, telefone],
+  );
 }
 
 // Aprende a ligação LID <-> telefone com a própria Evolution (lista de participantes dos grupos) e descobre

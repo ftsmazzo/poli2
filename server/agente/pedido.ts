@@ -30,6 +30,8 @@ export interface Pedido {
   autorNome: string | null;
   consulta: string;
   waMessageId: string;
+  // Telefone (só dígitos) de quem pediu, já conferido como autorizado: é para onde vai o link do painel.
+  telefoneAutor: string | null;
 }
 
 // "detalhe" diz só o TIPO do identificador do autor (número ou LID), nunca o número: serve para diagnosticar.
@@ -132,7 +134,19 @@ export async function avaliarPedido(
         (r) => r.telefone as string,
       )
     : [];
-  if (!ehComandante(msg, comandantes, conhecidos)) {
+  // Quem pode pedir: os números do ambiente (ponto de partida) mais as pessoas marcadas como "pode comandar"
+  // no painel, pelo telefone guardado ou pelo que a Poli ligou ao LID delas.
+  const doPainel = await db.query(
+    `select coalesce(p.telefone, case when p.jid like '%@s.whatsapp.net' then split_part(p.jid, '@', 1) end, l.telefone) as fone
+     from pessoas p left join lids l on l.workspace_id = p.workspace_id and p.jid = l.lid || '@lid'
+     where p.workspace_id = $1 and p.pode_comandar`,
+    [inst.rows[0].workspace_id],
+  );
+  const permitidos = [...comandantes, ...doPainel.rows.map((r) => r.fone as string | null).filter((f): f is string => !!f)].map(numeroDe).filter(Boolean);
+  const autorizados = new Set(permitidos.map(chaveNumero));
+  const candidato = [msg.autorAlt, msg.autorJid, ...conhecidos].map(numeroDe).find((d) => d !== '' && autorizados.has(chaveNumero(d)));
+  const telefoneAutor = candidato ? (permitidos.find((p) => chaveNumero(p) === chaveNumero(candidato)) ?? candidato) : null;
+  if (!telefoneAutor) {
     // O telefone sai mascarado (começo e 4 últimos dígitos): dá para o dono reconhecer o próprio número.
     const telefones = [...new Set([msg.autorAlt, ...conhecidos].filter((t): t is string => !!t).map(numeroDe).filter(Boolean))];
     return {
@@ -155,6 +169,7 @@ export async function avaliarPedido(
       autorNome: msg.autorNome,
       consulta: chamada.consulta || 'oi',
       waMessageId: msg.waMessageId,
+      telefoneAutor,
     },
   };
 }

@@ -131,6 +131,30 @@ describe('avaliarPedido', () => {
     });
   });
 
+  it('devolve o telefone autorizado de quem pediu, completo, mesmo se o WhatsApp mandou sem o nono dígito', async () => {
+    const r = await avaliarPedido(db, 'inst-a', msg('Poli2 painel', { participant: '551698480805@s.whatsapp.net' }), dono);
+    expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5516998480805' } });
+  });
+
+  it('autoriza quem foi marcado como "pode comandar" no painel, mesmo fora do ambiente', async () => {
+    await db.query(`insert into pessoas (workspace_id, jid, nome, telefone, papel, pode_comandar) values (1, '5511999990000@s.whatsapp.net', 'Beltrano', '5511999990000', 'head', true)`);
+    const r = await avaliarPedido(db, 'inst-a', msg('Poli2 oi', { participant: '5511999990000@s.whatsapp.net' }), []);
+    expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5511999990000' } });
+  });
+
+  it('quem não foi marcado como "pode comandar" continua recusado', async () => {
+    await db.query(`insert into pessoas (workspace_id, jid, nome, telefone, papel, pode_comandar) values (1, '5511999990000@s.whatsapp.net', 'Beltrano', '5511999990000', 'head', false)`);
+    const r = await avaliarPedido(db, 'inst-a', msg('Poli2 oi', { participant: '5511999990000@s.whatsapp.net' }), []);
+    expect(r.tipo).toBe('nao_autorizado');
+  });
+
+  it('pessoa cadastrada só pelo LID e marcada no painel é reconhecida pelo par que a Poli aprendeu', async () => {
+    await db.query(`insert into pessoas (workspace_id, jid, nome, papel, pode_comandar) values (1, '222222222222222@lid', 'Beltrano', 'head', true)`);
+    await db.query(`insert into lids (workspace_id, lid, telefone) values (1, '222222222222222', '5511999990000')`);
+    const r = await avaliarPedido(db, 'inst-a', msg('Poli2 painel', { participant: '222222222222222@lid' }), []);
+    expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5511999990000' } });
+  });
+
   it('chamada vazia vira um "oi"', async () => {
     const r = await avaliarPedido(db, 'inst-a', msg('Poli2'), dono);
     expect(r).toMatchObject({ tipo: 'pedido', pedido: { consulta: 'oi' } });

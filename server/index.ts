@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import type { Pool } from 'pg';
 import { loadConfig } from './config';
@@ -13,6 +15,9 @@ import type { MensagemNormalizada } from './ingest/evolution';
 import type { Db } from './migrate';
 import { extrairItensPendentes } from './extrair/persistir';
 import { LIMITES_PADRAO, processarMidiasPendentes } from './midia/processar';
+import { ehPedidoDePainel, entregarLinkDoPainel } from './agente/painel';
+import { conectorReal } from './fontes/mcp';
+import { painelRouter } from './painel/api';
 import { webhookRouter } from './webhooks';
 
 const cfg = loadConfig();
@@ -55,12 +60,22 @@ async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<vo
   }
 
   const evo = { url: cfg.evolutionUrl, apiKey: cfg.evolutionApiKey };
+  const enviar = (inst: string, destino: string, texto: string) => enviarTexto(evo, inst, destino, texto);
+
+  // "painel": o link de acesso vai para o PRIVADO de quem pediu; o grupo só recebe o aviso.
+  if (ehPedidoDePainel(avaliacao.pedido.consulta)) {
+    console.log(`painel: link ${await entregarLinkDoPainel({ db, enviar, urlBase: cfg.appUrl }, avaliacao.pedido)}`);
+    return;
+  }
+
   const situacao = await responderPedido(
     {
       db,
       chat: criarChatOpenRouter(cfg.openrouterKey),
       modelos: { orquestrador: cfg.modeloOrquestrador, redatora: cfg.modeloRedatora },
-      enviar: (inst, jid, texto) => enviarTexto(evo, inst, jid, texto),
+      enviar,
+      conectorMcp: conectorReal,
+      chaveCripto: cfg.chaveCripto,
     },
     avaliacao.pedido,
   );
@@ -68,6 +83,28 @@ async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<vo
 }
 
 app.use('/webhooks', webhookRouter(() => (bancoPronto ? pool : undefined), cfg.webhookToken, aoGravar));
+
+// O painel acessa o banco por aqui: se o banco ainda não subiu, o pedido falha com erro claro em vez de travar.
+const bancoDoPainel: Db = {
+  query: async (sql, params) => {
+    if (!pool || !bancoPronto) throw new Error('banco indisponível');
+    return pool.query(sql, params as unknown[]);
+  },
+};
+app.use('/api', painelRouter({ db: bancoDoPainel, conectar: conectorReal, chaveCripto: cfg.chaveCripto, cookieSeguro: cfg.appUrl.startsWith('https://') }));
+
+// Painel (React): arquivos estáticos e a página inicial para qualquer endereço que não seja da API.
+const pastaDoPainel = path.resolve(process.cwd(), 'painel', 'dist');
+if (existsSync(pastaDoPainel)) {
+  app.use(express.static(pastaDoPainel, { index: false }));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path === '/health' || req.path.startsWith('/webhooks') || req.path.startsWith('/api')) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(pastaDoPainel, 'index.html'));
+  });
+}
 
 app.listen(cfg.port, () => {
   console.log(`poli2 ouvindo na porta ${cfg.port}`);
@@ -201,7 +238,7 @@ function iniciarSincronizacao(): void {
     !cfg.evolutionApiKey && 'EVOLUTION_API_KEY',
   ].filter(Boolean);
   console.log(
-    `agente: ${faltando.length ? `DESLIGADO, faltam ${faltando.join(', ')}` : 'pronto'}; comandantes lidos: ${cfg.comandantes.length}; modelos: ${cfg.modeloOrquestrador} e ${cfg.modeloRedatora}`,
+    `agente: ${faltando.length ? `DESLIGADO, faltam ${faltando.join(', ')}` : 'pronto'}; comandantes lidos: ${cfg.comandantes.length}; chave de criptografia: ${cfg.chaveCripto ? 'presente' : 'AUSENTE (Fontes com token não funcionam)'}; modelos: ${cfg.modeloOrquestrador} e ${cfg.modeloRedatora}`,
   );
   void extrairItens();
   setInterval(() => void extrairItens(), INTERVALO_EXTRACAO_MS);

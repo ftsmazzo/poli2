@@ -1,3 +1,4 @@
+import { ferramentasMcp, type ConectorMcp, type FerramentasMcp } from '../fontes/mcp';
 import type { Db } from '../migrate';
 import { criarFerramentas } from './ferramentas';
 import { aplicarGates } from './gates';
@@ -11,6 +12,9 @@ export interface DepsTurno {
   modelos: { orquestrador: string; redatora: string };
   enviar: (instancia: string, grupoJid: string, texto: string) => Promise<{ waMessageId: string | null }>;
   agora?: () => Date;
+  // Fontes MCP cadastradas no painel. Sem os dois, o agente usa só as mensagens dos grupos.
+  conectorMcp?: ConectorMcp;
+  chaveCripto?: string;
 }
 
 const MAX_PASSOS = 6;
@@ -39,9 +43,15 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
   const usadas: string[] = [];
   let situacao: SituacaoTurno = 'respondido';
   let resposta: string;
+  let mcp: FerramentasMcp | null = null;
 
   try {
     const ferramentas = criarFerramentas(db, p.workspaceId);
+    if (deps.conectorMcp) {
+      const grupo = await db.query('select id from grupos where workspace_id = $1 and jid = $2', [p.workspaceId, p.grupoJid]);
+      // Sem chave, só as Fontes sem segredo funcionam (decifrar o resto falha com erro claro).
+      mcp = await ferramentasMcp(db, deps.conectorMcp, deps.chaveCripto ?? '', p.workspaceId, grupo.rows[0] ? Number(grupo.rows[0].id) : null);
+    }
     const agora = (deps.agora?.() ?? new Date()).toLocaleString('pt-BR', {
       timeZone: 'America/Belem',
       dateStyle: 'full',
@@ -56,7 +66,7 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
     let notas = '';
 
     for (let passo = 0; passo < MAX_PASSOS; passo++) {
-      const r = await deps.chat({ model: deps.modelos.orquestrador, messages: conversa, tools: ferramentas.specs });
+      const r = await deps.chat({ model: deps.modelos.orquestrador, messages: conversa, tools: [...ferramentas.specs, ...(mcp?.specs ?? [])] });
       if (r.toolCalls.length === 0) {
         notas = r.content ?? '';
         break;
@@ -64,7 +74,8 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
       conversa.push({ role: 'assistant', content: r.content, tool_calls: r.toolCalls });
       for (const chamada of r.toolCalls) {
         usadas.push(chamada.function.name);
-        const saida = JSON.stringify(await ferramentas.executar(chamada.function.name, chamada.function.arguments)).slice(0, MAX_RESULTADO);
+        const executor = mcp?.ehMinha(chamada.function.name) ? mcp : ferramentas;
+        const saida = JSON.stringify(await executor.executar(chamada.function.name, chamada.function.arguments)).slice(0, MAX_RESULTADO);
         evidencias.push(saida);
         conversa.push({ role: 'tool', tool_call_id: chamada.id, content: saida });
       }
@@ -87,6 +98,8 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
     resposta = FALHA;
     // Só a mensagem do erro: nunca o pedido nem o conteúdo das conversas.
     console.error('turno falhou:', err instanceof Error ? err.message : err);
+  } finally {
+    await mcp?.fechar();
   }
 
   try {

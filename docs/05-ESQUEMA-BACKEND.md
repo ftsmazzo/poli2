@@ -51,7 +51,7 @@
 
 ## 2. Autenticação e autorização
 
-- Método: login próprio por pessoa (e-mail e senha com Argon2id), sessão em cookie httpOnly com hash do token no banco, rate limit no login. Entrada só por convite, sem cadastro público.
+- Método: login **pelo WhatsApp, sem senha**. A pessoa autorizada pede "painel" à Poli e recebe no privado um link de uso único (15 minutos, tabela `login_links`, só o hash do token). O usuário é identificado pelo telefone (`usuarios.telefone`); e-mail e senha são opcionais e não usados. Sessão em cookie httpOnly com hash do token no banco (`sessoes`). Sem cadastro público: quem pode entrar é quem a Poli reconhece como autorizado (variável `COMANDANTES` e as pessoas marcadas como "pode comandar" no painel).
 - Níveis de permissão/papéis:
   - **Painel:** admin do tenant (tudo) e Head (leitura e ajuste de grupos e alertas, sem editar Fontes nem segredos).
   - **WhatsApp:** head, vip, equipe e outro, definidos em `pessoas`. `pode_comandar` e `pode_conversar` controlam o privado.

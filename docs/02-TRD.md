@@ -32,7 +32,7 @@
 - Performance: busca abaixo de 10 s (p95), resumo de 24 h abaixo de 60 s, atraso de ingestão mediano abaixo de 30 s (metas do PRD).
 - Escalabilidade: 2 tenants, dezenas de grupos e centenas de milhares de mensagens. Um serviço e um Postgres bastam. O MVP não exige escala horizontal.
 - Segurança:
-  - Painel com login próprio (Argon2id), sessão em cookie httpOnly e papéis por tenant.
+  - Painel com login **pelo WhatsApp, sem senha**: quem está autorizado a pedir à Poli escreve "painel" e recebe, no privado, um link de uso único com validade de 15 minutos. O link só abre a página; quem o troca pela sessão é um POST feito pela página (assim a pré-visualização do WhatsApp não gasta o link). Sessão em cookie httpOnly de 30 dias, só o hash do token fica no banco, papéis por tenant. (Decisão posterior ao desenho original, que previa e-mail e senha com Argon2id.)
   - Segredos das Fontes criptografados no banco (AES-256-GCM, chave em variável de ambiente).
   - Webhook da Evolution com token verificado.
   - **Retorno de tools MCP é dado, nunca instrução** (defesa contra prompt injection). Tools de escrita ficam desligadas por padrão.

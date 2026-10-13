@@ -188,11 +188,20 @@ export async function gravarMensagem(
   let pessoaId: number | null = null;
   if (msg.autorJid) {
     // Quem o sistema ainda não conhece entra como "outro": papel só se atribui no painel.
+    // O telefone vem do próprio JID (quando é número) ou do campo alternativo (quando o JID é um LID).
+    const soDigitos = (j: string) => j.split('@')[0].split(':')[0].replace(/\D/g, '');
+    const telefone = msg.autorJid.endsWith('@s.whatsapp.net')
+      ? soDigitos(msg.autorJid)
+      : msg.autorAlt && !msg.autorAlt.endsWith('@lid')
+        ? soDigitos(msg.autorAlt)
+        : null;
     const pessoa = await db.query(
-      `insert into pessoas (workspace_id, jid, nome, papel) values ($1, $2, $3, 'outro')
-       on conflict (workspace_id, jid) do update set nome = coalesce(excluded.nome, pessoas.nome)
+      `insert into pessoas (workspace_id, jid, nome, papel, telefone) values ($1, $2, $3, 'outro', $4)
+       on conflict (workspace_id, jid) do update set
+         nome = coalesce(excluded.nome, pessoas.nome),
+         telefone = coalesce(pessoas.telefone, excluded.telefone)
        returning id`,
-      [workspaceId, msg.autorJid, msg.autorNome],
+      [workspaceId, msg.autorJid, msg.autorNome, telefone],
     );
     pessoaId = pessoa.rows[0].id as number;
   }

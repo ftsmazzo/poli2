@@ -21,6 +21,10 @@ export interface Config {
   modeloRedatora: string;
   // Números que podem pedir coisas à Poli (só dígitos, com DDI). Vem do ambiente: nunca fica no repositório.
   comandantes: string[];
+  // Endereço público do painel, usado no link que a Poli manda por WhatsApp.
+  appUrl: string;
+  // Chave que criptografa os segredos das Fontes.
+  chaveCripto?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -36,5 +40,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     modeloOrquestrador: lerEnv(env, 'OPENROUTER_ORCH_MODEL') ?? 'anthropic/claude-haiku-5.5',
     modeloRedatora: lerEnv(env, 'OPENROUTER_REDATORA_MODEL') ?? 'anthropic/claude-sonnet-5.5',
     comandantes: normalizarComandantes((lerEnv(env, 'COMANDANTES') ?? '').split(/[,;\s]+/)),
+    appUrl: (lerEnv(env, 'APP_URL') ?? 'https://poli2-app.kxryyk.easypanel.host').replace(/\/+$/, ''),
+    chaveCripto: lerEnv(env, 'ENCRYPTION_KEY'),
   };
 }
