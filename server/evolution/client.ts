@@ -58,6 +58,49 @@ export async function lerWebhook(cfg: EvolutionCfg, nome: string, f: Fetcher = f
   }
 }
 
+export interface GrupoEvo {
+  jid: string;
+  nome: string | null;
+}
+
+// Grupos de que o número participa, com o nome (assunto) de cada um.
+export async function listarGrupos(cfg: EvolutionCfg, instancia: string, f: Fetcher = fetch): Promise<GrupoEvo[]> {
+  const dados = await chamar(cfg, f, `/group/fetchAllGroups/${encodeURIComponent(instancia)}?getParticipants=false`);
+  const lista: any[] = Array.isArray(dados) ? dados : [];
+  return lista
+    .map((g) => ({
+      jid: String(g?.id ?? ''),
+      nome: typeof g?.subject === 'string' && g.subject ? (g.subject as string) : null,
+    }))
+    .filter((g) => g.jid.endsWith('@g.us'));
+}
+
+export interface PaginaMensagens {
+  registros: any[];
+  paginas: number;
+}
+
+// Mensagens que a Evolution guardou de um grupo, página a página (formato igual ao do webhook).
+export async function buscarMensagens(
+  cfg: EvolutionCfg,
+  instancia: string,
+  grupoJid: string,
+  pagina: number,
+  porPagina: number,
+  f: Fetcher = fetch,
+): Promise<PaginaMensagens> {
+  const r = await chamar(cfg, f, `/chat/findMessages/${encodeURIComponent(instancia)}`, {
+    method: 'POST',
+    // Na Evolution v2 "offset" é o tamanho da página.
+    body: JSON.stringify({ where: { key: { remoteJid: grupoJid } }, page: pagina, offset: porPagina }),
+  });
+  const m = r?.messages ?? r;
+  const registros: any[] = Array.isArray(m) ? m : Array.isArray(m?.records) ? m.records : [];
+  // Sem total de páginas na resposta: página cheia indica que pode haver mais.
+  const paginas = Number(m?.pages ?? r?.pages ?? (registros.length >= porPagina ? pagina + 1 : pagina));
+  return { registros, paginas };
+}
+
 export function eventosDoWebhook(w: WebhookAtual): string[] {
   return w.events.map(normalizarEvento);
 }

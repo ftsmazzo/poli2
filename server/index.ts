@@ -2,6 +2,7 @@ import express from 'express';
 import type { Pool } from 'pg';
 import { loadConfig } from './config';
 import { comLockTentativa, criarPool, migrarComLock } from './db';
+import { importarHistoricoPendente } from './evolution/historico';
 import { sincronizarInstancias } from './evolution/sync';
 import { webhookRouter } from './webhooks';
 
@@ -65,6 +66,21 @@ async function sincronizarEvolution(): Promise<void> {
         console.log(
           `evolution: ${r.instancias} instância(s); tenants criados: [${r.tenantsCriados}]; webhooks ajustados: [${r.webhooksConfigurados}]; erros: [${r.erros}]`,
         );
+      }
+
+      // Histórico: cada grupo é importado uma vez, depois só o webhook traz mensagens.
+      const instancias = await db.query('select evolution_instance from instancias_wa where ativa');
+      for (const { evolution_instance: nome } of instancias.rows) {
+        try {
+          const h = await importarHistoricoPendente(db, evo, nome);
+          if (h.gruposImportados || h.erros.length) {
+            console.log(
+              `histórico ${nome}: ${h.grupos} grupo(s); importados agora: ${h.gruposImportados}; mensagens gravadas: ${h.gravadas}; já existiam: ${h.duplicadas}; erros: [${h.erros}]`,
+            );
+          }
+        } catch (err) {
+          console.error(`histórico ${nome} falhou:`, err instanceof Error ? err.message : err);
+        }
       }
     });
   } catch (err) {
