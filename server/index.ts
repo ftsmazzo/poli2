@@ -36,7 +36,10 @@ app.get('/health', async (_req, res) => {
 
 // Pedido feito à Poli no grupo: reconhece, confere quem pediu, busca, redige e responde.
 async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<void> {
-  if (!pool || !bancoPronto || !cfg.openrouterKey || !cfg.evolutionUrl || !cfg.evolutionApiKey) return;
+  if (!pool || !bancoPronto || !cfg.openrouterKey || !cfg.evolutionUrl || !cfg.evolutionApiKey) {
+    console.log('pedido ignorado: agente desligado por falta de configuração (veja a linha "agente:" ao subir)');
+    return;
+  }
   const db = pool as unknown as Db;
   const avaliacao = await avaliarPedido(db, instancia, msg, cfg.comandantes);
   if (avaliacao.tipo === 'nao_autorizado') {
@@ -44,7 +47,11 @@ async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<vo
     console.log(`pedido ignorado: autor não autorizado (${avaliacao.detalhe})`);
     return;
   }
-  if (avaliacao.tipo !== 'pedido') return;
+  if (avaliacao.tipo === 'ignorar') {
+    // Só registra quando a mensagem parece falar com a Poli (cita "poli" ou tem @): evita ruído de conversa comum.
+    if (avaliacao.motivo && /poli|@/i.test(msg.texto ?? '')) console.log(`pedido ignorado: ${avaliacao.motivo}`);
+    return;
+  }
 
   const evo = { url: cfg.evolutionUrl, apiKey: cfg.evolutionApiKey };
   const situacao = await responderPedido(
@@ -170,6 +177,15 @@ async function extrairItens(): Promise<void> {
 
 function iniciarSincronizacao(): void {
   // A extração só depende do banco, não da Evolution.
+  // Estado do agente ao subir: só nomes de variáveis que faltam e contagens, nunca valores.
+  const faltando = [
+    !cfg.openrouterKey && 'OPENROUTER_API_KEY',
+    !cfg.evolutionUrl && 'EVOLUTION_URL',
+    !cfg.evolutionApiKey && 'EVOLUTION_API_KEY',
+  ].filter(Boolean);
+  console.log(
+    `agente: ${faltando.length ? `DESLIGADO, faltam ${faltando.join(', ')}` : 'pronto'}; comandantes lidos: ${cfg.comandantes.length}; modelos: ${cfg.modeloOrquestrador} e ${cfg.modeloRedatora}`,
+  );
   void extrairItens();
   setInterval(() => void extrairItens(), INTERVALO_EXTRACAO_MS);
   if (!cfg.evolutionUrl || !cfg.evolutionApiKey || !cfg.webhookToken) {

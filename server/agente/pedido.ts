@@ -35,7 +35,8 @@ export interface Pedido {
 // "detalhe" diz só o TIPO do identificador do autor (número ou LID), nunca o número: serve para diagnosticar.
 export type Avaliacao =
   | { tipo: 'pedido'; pedido: Pedido }
-  | { tipo: 'ignorar' }
+  // "motivo" só existe quando vale diagnosticar: descreve a mensagem em sim/não, nunca o conteúdo nem números.
+  | { tipo: 'ignorar'; motivo?: string }
   | { tipo: 'nao_autorizado'; detalhe: string };
 
 const dominio = (jid: string | null) => (jid && jid.includes('@') ? jid.split('@')[1] : 'nenhum');
@@ -87,7 +88,15 @@ export async function avaliarPedido(
   if (inst.rows.length === 0) return { tipo: 'ignorar' };
 
   const chamada = ativaPoli(msg, inst.rows[0].jid_proprio);
-  if (!chamada.ativa) return { tipo: 'ignorar' };
+  if (!chamada.ativa) {
+    const tipos = msg.mencionados.map((j) => dominio(j)).sort().join(',') || 'nenhum';
+    return {
+      tipo: 'ignorar',
+      motivo:
+        `não foi reconhecida como chamada (marcados: ${tipos}; número próprio ${inst.rows[0].jid_proprio ? 'conhecido' : 'DESCONHECIDO'}; ` +
+        `@número no texto: ${/@\d{8,15}/.test(msg.texto) ? 'sim' : 'não'}; resposta a mensagem: ${msg.citadaAutor ? `sim (${dominio(msg.citadaAutor)})` : 'não'})`,
+    };
+  }
   if (!ehComandante(msg, comandantes)) {
     return { tipo: 'nao_autorizado', detalhe: `autor: ${dominio(msg.autorJid)}; alternativo: ${dominio(msg.autorAlt)}` };
   }
