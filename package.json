@@ -7,8 +7,7 @@
     "dev": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "tenant:criar": "tsx server/cli/criar-tenant.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0",

@@ -1,7 +1,8 @@
 import express from 'express';
 import type { Pool } from 'pg';
 import { loadConfig } from './config';
-import { criarPool, migrarComLock } from './db';
+import { comLockTentativa, criarPool, migrarComLock } from './db';
+import { sincronizarInstancias } from './evolution/sync';
 import { webhookRouter } from './webhooks';
 
 const cfg = loadConfig();
@@ -43,7 +44,41 @@ async function iniciarBanco(): Promise<void> {
     console.log(aplicadas.length ? `migrations aplicadas: ${aplicadas.join(', ')}` : 'banco em dia');
   } catch (err) {
     console.error('falha ao preparar o banco:', err instanceof Error ? err.message : err);
+    return;
   }
+  iniciarSincronizacao();
+}
+
+const LOCK_SINCRONIZACAO = 8421002;
+const INTERVALO_SINCRONIZACAO_MS = 5 * 60_000;
+
+// A Poli descobre sozinha as instâncias da Evolution: cria o tenant de cada uma
+// e aponta o webhook para si mesma. Ninguém precisa configurar isso à mão.
+async function sincronizarEvolution(): Promise<void> {
+  if (!pool || !cfg.evolutionUrl || !cfg.evolutionApiKey || !cfg.webhookToken) return;
+  const evo = { url: cfg.evolutionUrl, apiKey: cfg.evolutionApiKey };
+  const opcoes = { webhookBase: cfg.webhookBaseUrl, token: cfg.webhookToken };
+  try {
+    await comLockTentativa(pool, LOCK_SINCRONIZACAO, async (db) => {
+      const r = await sincronizarInstancias(db, evo, opcoes);
+      if (r.tenantsCriados.length || r.webhooksConfigurados.length || r.erros.length) {
+        console.log(
+          `evolution: ${r.instancias} instância(s); tenants criados: [${r.tenantsCriados}]; webhooks ajustados: [${r.webhooksConfigurados}]; erros: [${r.erros}]`,
+        );
+      }
+    });
+  } catch (err) {
+    console.error('sincronização com a Evolution falhou:', err instanceof Error ? err.message : err);
+  }
+}
+
+function iniciarSincronizacao(): void {
+  if (!cfg.evolutionUrl || !cfg.evolutionApiKey || !cfg.webhookToken) {
+    console.warn('Sincronização com a Evolution desligada: faltam EVOLUTION_URL, EVOLUTION_API_KEY ou EVOLUTION_WEBHOOK_TOKEN.');
+    return;
+  }
+  void sincronizarEvolution();
+  setInterval(() => void sincronizarEvolution(), INTERVALO_SINCRONIZACAO_MS);
 }
 
 void iniciarBanco();
