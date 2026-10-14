@@ -176,6 +176,8 @@ export async function testarFonte(db: Db, conectar: ConectorMcp, chave: string, 
 
 export interface FerramentasMcp {
   specs: EspecFerramenta[];
+  // "Quando usar" de cada Fonte, uma vez só (e não repetido em cada ferramenta), para entrar nas instruções da busca.
+  orientacoes: string;
   ehMinha(nome: string): boolean;
   executar(nome: string, argumentosJson: string): Promise<unknown>;
   fechar(): Promise<void>;
@@ -196,17 +198,22 @@ export async function ferramentasMcp(db: Db, conectar: ConectorMcp, chave: strin
 
   const mapa = new Map<string, { fonteId: number; fonteNome: string; ferramenta: string; config: any; segredo: string | null }>();
   const specs: EspecFerramenta[] = [];
+  const orientacoesPorFonte = new Map<number, { nome: string; quando: string; ferramentas: string[] }>();
   for (const row of r.rows) {
     const grupos = row.escopo?.grupos;
     if (Array.isArray(grupos) && (grupoId === null || !grupos.map(Number).includes(grupoId))) continue;
     const nome = `f${row.id}__${slug(row.ferramenta)}`.slice(0, 64);
     mapa.set(nome, { fonteId: Number(row.id), fonteNome: row.nome, ferramenta: row.ferramenta, config: row.config, segredo: row.segredo_enc });
-    const quando = row.quando_usar ? ` Quando usar: ${row.quando_usar}` : '';
+    if (row.quando_usar) {
+      const o = orientacoesPorFonte.get(Number(row.id)) ?? { nome: String(row.nome), quando: String(row.quando_usar), ferramentas: [] };
+      o.ferramentas.push(nome);
+      orientacoesPorFonte.set(Number(row.id), o);
+    }
     specs.push({
       type: 'function',
       function: {
         name: nome,
-        description: `[Fonte: ${row.nome}] ${row.descricao ?? ''}${quando}`.slice(0, 1000),
+        description: `[Fonte: ${row.nome}] ${row.descricao ?? ''}`.slice(0, 1000),
         parameters: { type: 'object', properties: {}, ...(row.esquema ?? {}) },
       },
     });
@@ -222,8 +229,13 @@ export async function ferramentasMcp(db: Db, conectar: ConectorMcp, chave: strin
     return c;
   };
 
+  const orientacoes = [...orientacoesPorFonte.values()]
+    .map((o) => `Fonte "${o.nome}" (ferramentas: ${o.ferramentas.join(', ')}). Quando usar: ${o.quando}`)
+    .join('\n');
+
   return {
     specs,
+    orientacoes,
     ehMinha: (nome) => mapa.has(nome),
     async executar(nome, argumentosJson) {
       const m = mapa.get(nome);

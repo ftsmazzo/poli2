@@ -60,7 +60,10 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
     });
 
     const conversa: MensagemChat[] = [
-      { role: 'system', content: promptOrquestrador(agora) },
+      {
+        role: 'system',
+        content: promptOrquestrador(agora) + (mcp?.orientacoes ? `\n\nOrientações das Fontes conectadas (escritas pela equipe; quando mais de uma servir, combine):\n${mcp.orientacoes}` : ''),
+      },
       {
         role: 'user',
         content: p.privado

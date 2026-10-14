@@ -179,7 +179,12 @@ describe('Fontes MCP', () => {
       expect(nomes.every((n) => /^f\d+__[a-zA-Z0-9_-]+$/.test(n) && n.length <= 64)).toBe(true);
       const votos = f.specs.find((x) => x.function.name.endsWith('__buscar_votos'))!;
       expect(votos.function.description).toContain('[Fonte: Urna TSE]');
-      expect(votos.function.description).toContain('Quando usar: dados de votação');
+      // O "Quando usar" não se repete em cada ferramenta: vai uma vez só, em "orientacoes", com os nomes das ferramentas da Fonte.
+      expect(votos.function.description).not.toContain('Quando usar');
+      expect(f.orientacoes).toContain('Fonte "Urna TSE"');
+      expect(f.orientacoes).toContain('Quando usar: dados de votação');
+      expect(f.orientacoes).toContain(votos.function.name);
+      expect(f.orientacoes.match(/Quando usar/g)).toHaveLength(1);
       expect(votos.function.parameters).toMatchObject({ type: 'object', properties: { municipio: { type: 'string' } } });
     });
 

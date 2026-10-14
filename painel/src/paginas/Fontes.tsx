@@ -12,6 +12,9 @@ import { useSessao } from '../sessao';
 
 // ---------- Formulário (gaveta) ----------
 
+// Um MCP pode ter várias ferramentas (urna, checagem de boato...), e este texto explica todas.
+const LIMITE_QUANDO_USAR = 2500;
+
 function FormularioFonte({ fonte, aoSalvar, aoFechar }: { fonte: Fonte | null; aoSalvar: (f: Fonte) => void; aoFechar: () => void }) {
   const editando = fonte !== null;
   const [nome, setNome] = useState(fonte?.nome ?? '');
@@ -121,8 +124,8 @@ function FormularioFonte({ fonte, aoSalvar, aoFechar }: { fonte: Fonte | null; a
         </div>
         <div className="campo">
           <label htmlFor="f-quando">Quando usar</label>
-          <textarea id="f-quando" rows={4} maxLength={500} value={quandoUsar} placeholder="Ex.: perguntas sobre resultados e votos de eleições passadas" onChange={(e) => setQuandoUsar(e.target.value)} />
-          <p className="ajuda-campo">Ajuda a Poli a escolher esta Fonte em vez de outra. {quandoUsar.length}/500</p>
+          <textarea id="f-quando" rows={8} maxLength={LIMITE_QUANDO_USAR} value={quandoUsar} placeholder="Ex.: perguntas sobre resultados e votos de eleições passadas" onChange={(e) => setQuandoUsar(e.target.value)} />
+          <p className="ajuda-campo">Ajuda a Poli a escolher esta Fonte em vez de outra. {quandoUsar.length}/{LIMITE_QUANDO_USAR}</p>
         </div>
       </form>
     </Dialogo>

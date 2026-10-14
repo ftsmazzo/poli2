@@ -51,7 +51,7 @@ const esquemaFonteNova = z.object({
   url: z.string().trim().max(500),
   segredo: z.string().max(2000).optional(),
   headerNome: tokenDeCabecalho.optional(),
-  quandoUsar: z.string().max(500).optional(),
+  quandoUsar: z.string().max(2500).optional(),
 });
 const esquemaFontePatch = z.object({
   nome: z.string().trim().min(1).max(80).optional(),
@@ -59,7 +59,7 @@ const esquemaFontePatch = z.object({
   // "" apaga o segredo guardado; vazio/ausente não mexe.
   segredo: z.string().max(2000).optional(),
   headerNome: tokenDeCabecalho.optional(),
-  quandoUsar: z.string().max(500).optional(),
+  quandoUsar: z.string().max(2500).optional(),
   ativa: z.boolean().optional(),
 });
 const esquemaGrupoPatch = z.object({
