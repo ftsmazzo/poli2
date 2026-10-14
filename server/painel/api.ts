@@ -339,6 +339,8 @@ export function painelRouter(deps: DepsApi): Router {
     if (p.data.acompanhar !== undefined) {
       params.push(p.data.acompanhar);
       sets.push(`acompanhar = $${params.length}`);
+      // Ligar recomeça do zero: a próxima leitura faz o resumo inicial das últimas 24 horas.
+      if (p.data.acompanhar) sets.push('ultima_leitura_em = null', 'ultima_leitura_msg_id = null');
     }
     if (p.data.intervaloMin !== undefined) {
       params.push(p.data.intervaloMin);

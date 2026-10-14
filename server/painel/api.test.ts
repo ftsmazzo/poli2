@@ -239,6 +239,17 @@ describe('API do painel', () => {
       expect((await chamar('/grupos', { cookie })).corpo[0]).toMatchObject({ acompanhar: true, intervaloMin: 30 });
     });
 
+    it('ligar o acompanhamento zera o ponto de leitura para refazer o resumo inicial; desligar não mexe', async () => {
+      const cookie = await entrar(1);
+      await db.query(`insert into grupos (workspace_id, jid, nome, acompanhar, ultima_leitura_em, ultima_leitura_msg_id) values (1, '1@g.us', 'IE', true, now(), 7)`);
+      await chamar('/grupos/1', { metodo: 'PATCH', cookie, corpo: { acompanhar: false } });
+      expect((await db.query<{ m: number | null }>('select ultima_leitura_msg_id as m from grupos where id = 1')).rows[0].m).toBe(7);
+      await chamar('/grupos/1', { metodo: 'PATCH', cookie, corpo: { acompanhar: true } });
+      const g = (await db.query<{ m: number | null; e: string | null }>('select ultima_leitura_msg_id as m, ultima_leitura_em as e from grupos where id = 1')).rows[0];
+      expect(g.m).toBeNull();
+      expect(g.e).toBeNull();
+    });
+
     it('recusa intervalo curto demais e pedido vazio; head pode mexer em grupo', async () => {
       const cookie = await entrar(1);
       await db.query(`insert into grupos (workspace_id, jid, nome) values (1, '1@g.us', 'IE')`);
