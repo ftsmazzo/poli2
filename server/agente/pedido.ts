@@ -1,5 +1,5 @@
 import type { Db } from '../migrate';
-import type { MensagemNormalizada } from '../ingest/evolution';
+import type { MensagemNormalizada, MensagemPrivada } from '../ingest/evolution';
 
 // "5596...:12@s.whatsapp.net" -> "5596..." (sem sufixo de aparelho nem domínio).
 export function numeroDe(jid: string | null | undefined): string {
@@ -32,6 +32,8 @@ export interface Pedido {
   waMessageId: string;
   // Telefone (só dígitos) de quem pediu, já conferido como autorizado: é para onde vai o link do painel.
   telefoneAutor: string | null;
+  // Pedido feito no privado: grupoJid é o contato, e a resposta volta para ele.
+  privado?: boolean;
 }
 
 // "detalhe" diz só o TIPO do identificador do autor (número ou LID), nunca o número: serve para diagnosticar.
@@ -103,6 +105,59 @@ export function ehComandante(msg: MensagemNormalizada, comandantes: string[], te
   });
 }
 
+// Confere se quem escreveu pode pedir: os números do ambiente (ponto de partida) mais as pessoas marcadas como
+// "pode comandar" no painel, pelo telefone guardado ou pelo que a Poli ligou ao LID delas.
+async function conferirAutor(
+  db: Db,
+  workspaceId: number,
+  autorJid: string | null,
+  autorAlt: string | null,
+  comandantes: string[],
+): Promise<{ telefone: string } | { negado: string }> {
+  // Autor que chega como LID: procura o telefone que a Poli já aprendeu para esse LID.
+  const lids = [autorJid, autorAlt].filter((j): j is string => !!j && j.endsWith('@lid')).map(numeroDe);
+  const conhecidos = lids.length
+    ? (await db.query('select telefone from lids where workspace_id = $1 and lid = any($2)', [workspaceId, lids])).rows.map((r) => r.telefone as string)
+    : [];
+  const doPainel = await db.query(
+    `select coalesce(p.telefone, case when p.jid like '%@s.whatsapp.net' then split_part(p.jid, '@', 1) end, l.telefone) as fone
+     from pessoas p left join lids l on l.workspace_id = p.workspace_id and p.jid = l.lid || '@lid'
+     where p.workspace_id = $1 and p.pode_comandar`,
+    [workspaceId],
+  );
+  const permitidos = [...comandantes, ...doPainel.rows.map((r) => r.fone as string | null).filter((f): f is string => !!f)].map(numeroDe).filter(Boolean);
+  const autorizados = new Set(permitidos.map(chaveNumero));
+  const candidato = [autorAlt, autorJid, ...conhecidos].map(numeroDe).find((d) => d !== '' && autorizados.has(chaveNumero(d)));
+  if (candidato) return { telefone: permitidos.find((p) => chaveNumero(p) === chaveNumero(candidato)) ?? candidato };
+  // O telefone sai mascarado (começo e 4 últimos dígitos): dá para o dono reconhecer o próprio número.
+  const telefones = [...new Set([autorAlt, ...conhecidos].filter((t): t is string => !!t).map(numeroDe).filter(Boolean))];
+  return { negado: `autor: ${dominio(autorJid)}; alternativo: ${dominio(autorAlt)}; telefone do autor: ${telefones.map(mascarar).join(', ') || 'desconhecido'}` };
+}
+
+// Conversa privada: não precisa chamar a Poli pelo nome (a conversa já é com ela), mas só atende quem tem permissão.
+export async function avaliarPrivado(db: Db, instancia: string, dm: MensagemPrivada, comandantes: string[]): Promise<Avaliacao> {
+  const inst = await db.query('select workspace_id from instancias_wa where evolution_instance = $1 and ativa', [instancia]);
+  if (inst.rows.length === 0) return { tipo: 'ignorar' };
+  const workspaceId = Number(inst.rows[0].workspace_id);
+  const quem = await conferirAutor(db, workspaceId, dm.contatoJid, dm.contatoAlt, comandantes);
+  if ('negado' in quem) return { tipo: 'nao_autorizado', detalhe: quem.negado };
+  const consulta = dm.texto.replace(CHAMADA_POR_NOME, '').replace(/\s+/g, ' ').trim();
+  return {
+    tipo: 'pedido',
+    pedido: {
+      workspaceId,
+      instancia,
+      grupoJid: dm.contatoJid,
+      grupoNome: null,
+      autorNome: dm.nome,
+      consulta: consulta || 'oi',
+      waMessageId: dm.waMessageId,
+      telefoneAutor: quem.telefone,
+      privado: true,
+    },
+  };
+}
+
 export async function avaliarPedido(
   db: Db,
   instancia: string,
@@ -127,33 +182,9 @@ export async function avaliarPedido(
         `@número no texto: ${/@\d{8,15}/.test(msg.texto) ? 'sim' : 'não'}; resposta a mensagem: ${msg.citadaAutor ? `sim (${dominio(msg.citadaAutor)})` : 'não'})`,
     };
   }
-  // Autor que chega como LID: procura o telefone que a Poli já aprendeu para esse LID.
-  const lids = [msg.autorJid, msg.autorAlt].filter((j): j is string => !!j && j.endsWith('@lid')).map(numeroDe);
-  const conhecidos = lids.length
-    ? (await db.query('select telefone from lids where workspace_id = $1 and lid = any($2)', [inst.rows[0].workspace_id, lids])).rows.map(
-        (r) => r.telefone as string,
-      )
-    : [];
-  // Quem pode pedir: os números do ambiente (ponto de partida) mais as pessoas marcadas como "pode comandar"
-  // no painel, pelo telefone guardado ou pelo que a Poli ligou ao LID delas.
-  const doPainel = await db.query(
-    `select coalesce(p.telefone, case when p.jid like '%@s.whatsapp.net' then split_part(p.jid, '@', 1) end, l.telefone) as fone
-     from pessoas p left join lids l on l.workspace_id = p.workspace_id and p.jid = l.lid || '@lid'
-     where p.workspace_id = $1 and p.pode_comandar`,
-    [inst.rows[0].workspace_id],
-  );
-  const permitidos = [...comandantes, ...doPainel.rows.map((r) => r.fone as string | null).filter((f): f is string => !!f)].map(numeroDe).filter(Boolean);
-  const autorizados = new Set(permitidos.map(chaveNumero));
-  const candidato = [msg.autorAlt, msg.autorJid, ...conhecidos].map(numeroDe).find((d) => d !== '' && autorizados.has(chaveNumero(d)));
-  const telefoneAutor = candidato ? (permitidos.find((p) => chaveNumero(p) === chaveNumero(candidato)) ?? candidato) : null;
-  if (!telefoneAutor) {
-    // O telefone sai mascarado (começo e 4 últimos dígitos): dá para o dono reconhecer o próprio número.
-    const telefones = [...new Set([msg.autorAlt, ...conhecidos].filter((t): t is string => !!t).map(numeroDe).filter(Boolean))];
-    return {
-      tipo: 'nao_autorizado',
-      detalhe: `autor: ${dominio(msg.autorJid)}; alternativo: ${dominio(msg.autorAlt)}; telefone do autor: ${telefones.map(mascarar).join(', ') || 'desconhecido'}`,
-    };
-  }
+  const quem = await conferirAutor(db, Number(inst.rows[0].workspace_id), msg.autorJid, msg.autorAlt, comandantes);
+  if ('negado' in quem) return { tipo: 'nao_autorizado', detalhe: quem.negado };
+  const telefoneAutor = quem.telefone;
 
   const grupo = await db.query('select nome from grupos where workspace_id = $1 and jid = $2', [
     inst.rows[0].workspace_id,

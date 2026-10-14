@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import express, { Router } from 'express';
 import type { Db } from './migrate';
-import { extrairMensagem, gravarMensagem, normalizarEvento, type MensagemNormalizada } from './ingest/evolution';
+import { extrairMensagem, extrairPrivado, gravarMensagem, normalizarEvento, type MensagemNormalizada, type MensagemPrivada } from './ingest/evolution';
 
 // Compara os hashes, não os textos: tempo constante e sem exigir o mesmo tamanho.
 function tokenValido(recebido: string, esperado: string): boolean {
@@ -13,7 +13,10 @@ function tokenValido(recebido: string, esperado: string): boolean {
 // ao webhook: responder um pedido pode demorar, e a Evolution reenviaria se o webhook ficasse esperando.
 export type AoGravar = (instancia: string, msg: MensagemNormalizada) => Promise<void>;
 
-export function webhookRouter(getDb: () => Db | undefined, token: string | undefined, aoGravar?: AoGravar): Router {
+// Mensagem de texto recebida no privado: nunca é gravada, só atendida se quem escreveu tiver permissão.
+export type AoReceberPrivado = (instancia: string, dm: MensagemPrivada) => Promise<void>;
+
+export function webhookRouter(getDb: () => Db | undefined, token: string | undefined, aoGravar?: AoGravar, aoPrivado?: AoReceberPrivado): Router {
   const router = Router();
 
   router.post('/evolution/:instancia', express.json({ limit: '15mb' }), async (req, res) => {
@@ -42,6 +45,13 @@ export function webhookRouter(getDb: () => Db | undefined, token: string | undef
       const itens: unknown[] = Array.isArray(req.body.data) ? req.body.data : [req.body.data];
       const resumo = { gravadas: 0, duplicadas: 0, ignoradas: 0, instancia_desconhecida: 0 };
       for (const item of itens) {
+        const dm = aoPrivado ? extrairPrivado(item) : null;
+        if (dm && aoPrivado) {
+          void aoPrivado(req.params.instancia, dm).catch((err) =>
+            console.error('atendimento no privado falhou:', err instanceof Error ? err.message : err),
+          );
+          continue;
+        }
         const msg = extrairMensagem(item);
         if (!msg) {
           resumo.ignoradas++;

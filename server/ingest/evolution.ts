@@ -161,7 +161,37 @@ export function extrairMensagem(data: any): MensagemNormalizada | null {
   };
 }
 
-export type ResultadoGravacao = 'gravada' | 'duplicada' | 'instancia_desconhecida';
+// Conversa privada com a Poli: não é gravada (a memória é só dos grupos); serve apenas para atender quem tem permissão.
+export interface MensagemPrivada {
+  waMessageId: string;
+  // Com quem a Poli conversa: número (@s.whatsapp.net) ou LID (@lid).
+  contatoJid: string;
+  // Número real quando o contato aparece como LID.
+  contatoAlt: string | null;
+  nome: string | null;
+  texto: string;
+}
+
+// Só texto recebido de uma pessoa: o que a própria Poli enviou, grupos, status e mídia sem legenda ficam de fora.
+export function extrairPrivado(data: any): MensagemPrivada | null {
+  const key = data?.key;
+  const jid: unknown = key?.remoteJid;
+  if (typeof jid !== 'string' || !(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid'))) return null;
+  if (key?.fromMe || typeof key?.id !== 'string' || !key.id) return null;
+  const message = desembrulhar(data.message);
+  const c = message ? conteudo(message) : null;
+  if (!c || c.tipo !== 'texto' || !c.texto) return null;
+  const alt = key.remoteJidAlt ?? data.remoteJidAlt;
+  return {
+    waMessageId: key.id,
+    contatoJid: jid,
+    contatoAlt: typeof alt === 'string' ? alt : null,
+    nome: typeof data.pushName === 'string' && data.pushName ? data.pushName : null,
+    texto: c.texto,
+  };
+}
+
+export type ResultadoGravacao ='gravada' | 'duplicada' | 'instancia_desconhecida';
 
 export async function gravarMensagem(
   db: Db,

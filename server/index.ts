@@ -10,10 +10,10 @@ import { sincronizarInstancias } from './evolution/sync';
 import { enviarPendentes, reprocessarSemDestino } from './alertas/envio';
 import { lerGruposVencidos } from './alertas/leitura';
 import { criarChatOpenRouter } from './agente/llm';
-import { avaliarPedido } from './agente/pedido';
+import { avaliarPedido, avaliarPrivado, type Avaliacao } from './agente/pedido';
 import { responderPedido } from './agente/turno';
 import { enviarTexto } from './evolution/client';
-import type { MensagemNormalizada } from './ingest/evolution';
+import type { MensagemNormalizada, MensagemPrivada } from './ingest/evolution';
 import type { Db } from './migrate';
 import { extrairItensPendentes } from './extrair/persistir';
 import { LIMITES_PADRAO, processarMidiasPendentes } from './midia/processar';
@@ -49,7 +49,18 @@ async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<vo
     return;
   }
   const db = pool as unknown as Db;
-  const avaliacao = await avaliarPedido(db, instancia, msg, cfg.comandantes);
+  await atender(db, await avaliarPedido(db, instancia, msg, cfg.comandantes), msg.texto);
+}
+
+// Conversa privada: mesma checagem de quem pode pedir, mas sem precisar chamar a Poli pelo nome.
+async function aoPrivado(instancia: string, dm: MensagemPrivada): Promise<void> {
+  if (!pool || !bancoPronto || !cfg.openrouterKey || !cfg.evolutionUrl || !cfg.evolutionApiKey) return;
+  const db = pool as unknown as Db;
+  await atender(db, await avaliarPrivado(db, instancia, dm, cfg.comandantes), dm.texto);
+}
+
+async function atender(db: Db, avaliacao: Avaliacao, texto: string | null): Promise<void> {
+  if (!cfg.openrouterKey || !cfg.evolutionUrl || !cfg.evolutionApiKey) return;
   if (avaliacao.tipo === 'nao_autorizado') {
     // Sem resposta e sem número no log: só o tipo do identificador, para diagnosticar.
     console.log(`pedido ignorado: autor não autorizado (${avaliacao.detalhe})`);
@@ -57,7 +68,7 @@ async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<vo
   }
   if (avaliacao.tipo === 'ignorar') {
     // Só registra quando a mensagem parece falar com a Poli (cita "poli" ou tem @): evita ruído de conversa comum.
-    if (avaliacao.motivo && /poli|@/i.test(msg.texto ?? '')) console.log(`pedido ignorado: ${avaliacao.motivo}`);
+    if (avaliacao.motivo && /poli|@/i.test(texto ?? '')) console.log(`pedido ignorado: ${avaliacao.motivo}`);
     return;
   }
 
@@ -84,7 +95,7 @@ async function aoGravar(instancia: string, msg: MensagemNormalizada): Promise<vo
   console.log(`pedido ${situacao}`);
 }
 
-app.use('/webhooks', webhookRouter(() => (bancoPronto ? pool : undefined), cfg.webhookToken, aoGravar));
+app.use('/webhooks', webhookRouter(() => (bancoPronto ? pool : undefined), cfg.webhookToken, aoGravar, aoPrivado));
 
 // O painel acessa o banco por aqui: se o banco ainda não subiu, o pedido falha com erro claro em vez de travar.
 const bancoDoPainel: Db = {

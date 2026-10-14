@@ -39,6 +39,7 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
   );
   if (novo.rows.length === 0) return 'duplicado';
   const turnoId = novo.rows[0].id as number;
+  const destinoTipo = p.privado ? 'privado' : 'grupo';
 
   const usadas: string[] = [];
   let situacao: SituacaoTurno = 'respondido';
@@ -60,7 +61,12 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
 
     const conversa: MensagemChat[] = [
       { role: 'system', content: promptOrquestrador(agora) },
-      { role: 'user', content: `Pedido de ${p.autorNome ?? 'alguém'} no grupo "${p.grupoNome ?? p.grupoJid}": ${p.consulta}` },
+      {
+        role: 'user',
+        content: p.privado
+          ? `Pedido de ${p.autorNome ?? 'alguém'} no privado: ${p.consulta}`
+          : `Pedido de ${p.autorNome ?? 'alguém'} no grupo "${p.grupoNome ?? p.grupoJid}": ${p.consulta}`,
+      },
     ];
     const evidencias: string[] = [];
     let notas = '';
@@ -106,16 +112,16 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
     const enviada = await deps.enviar(p.instancia, p.grupoJid, resposta);
     await db.query(
       `insert into mensagens_saida (workspace_id, destino_jid, destino_tipo, origem, texto, estado, wa_message_id, enviada_em)
-       values ($1, $2, 'grupo', 'resposta', $3, 'enviada', $4, now())`,
-      [p.workspaceId, p.grupoJid, resposta, enviada.waMessageId],
+       values ($1, $2, $5, 'resposta', $3, 'enviada', $4, now())`,
+      [p.workspaceId, p.grupoJid, resposta, enviada.waMessageId, destinoTipo],
     );
   } catch (err) {
     situacao = 'erro';
     console.error('envio da resposta falhou:', err instanceof Error ? err.message : err);
     await db.query(
       `insert into mensagens_saida (workspace_id, destino_jid, destino_tipo, origem, texto, estado, tentativas)
-       values ($1, $2, 'grupo', 'resposta', $3, 'falhou', 1)`,
-      [p.workspaceId, p.grupoJid, resposta],
+       values ($1, $2, $4, 'resposta', $3, 'falhou', 1)`,
+      [p.workspaceId, p.grupoJid, resposta, destinoTipo],
     );
   }
 

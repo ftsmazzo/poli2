@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite/vector';
 import { migrate } from '../migrate';
-import { extrairMensagem, type MensagemNormalizada } from '../ingest/evolution';
-import { ativaPoli, avaliarPedido, chaveNumero, ehComandante, normalizarComandantes, numeroDe } from './pedido';
+import { extrairMensagem, type MensagemNormalizada, type MensagemPrivada } from '../ingest/evolution';
+import { ativaPoli, avaliarPedido, avaliarPrivado,chaveNumero, ehComandante, normalizarComandantes, numeroDe } from './pedido';
 
 const GRUPO = '120363000000000001@g.us';
 const POLI = '5596900000000@s.whatsapp.net';
@@ -153,6 +153,45 @@ describe('avaliarPedido', () => {
     await db.query(`insert into lids (workspace_id, lid, telefone) values (1, '222222222222222', '5511999990000')`);
     const r = await avaliarPedido(db, 'inst-a', msg('Poli2 painel', { participant: '222222222222222@lid' }), []);
     expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5511999990000' } });
+  });
+
+  describe('no privado', () => {
+    const dm = (texto: string, extra: Partial<MensagemPrivada> = {}): MensagemPrivada => ({
+      waMessageId: 'DM1',
+      contatoJid: '5516998480805@s.whatsapp.net',
+      contatoAlt: null,
+      nome: 'Dono',
+      texto,
+      ...extra,
+    });
+
+    it('atende quem pode, sem precisar chamar a Poli pelo nome, e responde para o próprio contato', async () => {
+      const r = await avaliarPrivado(db, 'inst-a', dm('qual o link do plano?'), dono);
+      expect(r).toMatchObject({
+        tipo: 'pedido',
+        pedido: { workspaceId: 1, grupoJid: '5516998480805@s.whatsapp.net', consulta: 'qual o link do plano?', privado: true, telefoneAutor: '5516998480805' },
+      });
+    });
+
+    it('aceita o "Poli2" no começo e o tira da pergunta', async () => {
+      const r = await avaliarPrivado(db, 'inst-a', dm('Poli2 painel'), dono);
+      expect(r).toMatchObject({ tipo: 'pedido', pedido: { consulta: 'painel' } });
+    });
+
+    it('reconhece quem aparece como LID pelo par que a Poli aprendeu', async () => {
+      await db.query(`insert into lids (workspace_id, lid, telefone) values (1, '111111111111111', '5516998480805')`);
+      const r = await avaliarPrivado(db, 'inst-a', dm('oi', { contatoJid: '111111111111111@lid' }), dono);
+      expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5516998480805' } });
+    });
+
+    it('recusa quem não tem permissão', async () => {
+      const r = await avaliarPrivado(db, 'inst-a', dm('oi', { contatoJid: '5511999990000@s.whatsapp.net' }), dono);
+      expect(r.tipo).toBe('nao_autorizado');
+    });
+
+    it('ignora instância desconhecida', async () => {
+      expect((await avaliarPrivado(db, 'outra', dm('oi'), dono)).tipo).toBe('ignorar');
+    });
   });
 
   it('chamada vazia vira um "oi"', async () => {
