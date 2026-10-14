@@ -135,6 +135,44 @@ describe('responderPedido', () => {
     expect(s.rows).toEqual([{ estado: 'enviada', origem: 'resposta', wa_message_id: 'ENV1' }]);
   });
 
+  it('lembra o que foi pedido e respondido há pouco no mesmo grupo (pergunta de seguimento)', async () => {
+    const orquestrador: string[] = [];
+    const c: Chat = async ({ model, messages }) => {
+      const conversa = messages.map((m) => m.content ?? '').join('\n');
+      if (model === 'orq') {
+        orquestrador.push(conversa);
+        return { content: 'sem buscas', toolCalls: [] };
+      }
+      mensagensAoRedator.push(conversa);
+      return { content: 'Resposta.', toolCalls: [] };
+    };
+    await responderPedido(deps(c), pedido('PED1', 'o que o plano diz de saúde?'));
+    await responderPedido(deps(c), pedido('PED2', 'onde procurou?'));
+
+    expect(orquestrador[0]).not.toContain('Conversa recente');
+    expect(orquestrador[1]).toContain('Conversa recente');
+    expect(orquestrador[1]).toContain('o que o plano diz de saúde?');
+    expect(orquestrador[1]).toContain('Poli respondeu: Resposta.');
+    expect(mensagensAoRedator[1]).toContain('o que o plano diz de saúde?');
+  });
+
+  it('não mistura a conversa de outro grupo, nem a de mais de 30 minutos atrás', async () => {
+    await db.query(
+      `insert into turnos (workspace_id, pergunta, resposta, contato, criado_em) values
+       (1, 'pergunta de outro grupo', 'resposta de outro grupo', '9999@g.us', now()),
+       (1, 'pergunta antiga', 'resposta antiga', '${GRUPO}', now() - interval '2 hours')`,
+    );
+    const vistas: string[] = [];
+    const c: Chat = async ({ model, messages }) => {
+      if (model === 'orq') vistas.push(messages.map((m) => m.content ?? '').join('\n'));
+      return { content: 'ok', toolCalls: [] };
+    };
+    await responderPedido(deps(c), pedido('PED1', 'oi'));
+    expect(vistas[0]).not.toContain('Conversa recente');
+    expect(vistas[0]).not.toContain('outro grupo');
+    expect(vistas[0]).not.toContain('antiga');
+  });
+
   it('nunca responde duas vezes ao mesmo pedido', async () => {
     const c = chat({ orquestrador: buscaDeLink, redatora: () => ({ content: 'https://exemplo.com/plano', toolCalls: [] }) });
     expect(await responderPedido(deps(c), pedido('PED1'))).toBe('respondido');

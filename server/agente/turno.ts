@@ -18,6 +18,7 @@ export interface DepsTurno {
 }
 
 const MAX_PASSOS = 6;
+const MAX_TURNOS_ANTERIORES = 3;
 const MAX_RESULTADO = 15_000;
 const MAX_EVIDENCIA = 60_000;
 const FALHA = 'Não consegui responder agora. Tenta de novo em instantes.';
@@ -31,8 +32,8 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
   const inicio = Date.now();
 
   const novo = await db.query(
-    `insert into turnos (workspace_id, grupo_id, pergunta, wa_message_id)
-     values ($1, (select id from grupos where workspace_id = $1 and jid = $2), $3, $4)
+    `insert into turnos (workspace_id, grupo_id, pergunta, wa_message_id, contato)
+     values ($1, (select id from grupos where workspace_id = $1 and jid = $2), $3, $4, $2)
      on conflict (workspace_id, wa_message_id) where wa_message_id is not null do nothing
      returning id`,
     [p.workspaceId, p.grupoJid, p.consulta, p.waMessageId],
@@ -59,6 +60,20 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
       timeStyle: 'short',
     });
 
+    // O que foi pedido e respondido há pouco neste mesmo grupo ou privado: sem isso, "Onde procurou?" ou
+    // "e a saúde?" não fazem sentido para a Poli. Só os turnos já respondidos, dos últimos 30 minutos.
+    const anteriores = (
+      await db.query(
+        `select pergunta, resposta from turnos
+         where workspace_id = $1 and contato = $2 and id < $3 and resposta is not null and criado_em > now() - interval '30 minutes'
+         order by id desc limit ${MAX_TURNOS_ANTERIORES}`,
+        [p.workspaceId, p.grupoJid, turnoId],
+      )
+    ).rows.reverse() as { pergunta: string; resposta: string }[];
+    const recente = anteriores.length
+      ? `Conversa recente com esta pessoa/grupo (use só para entender o pedido atual):\n${anteriores.map((t) => `Pedido: ${t.pergunta}\nPoli respondeu: ${t.resposta}`).join('\n\n')}\n\n`
+      : '';
+
     const conversa: MensagemChat[] = [
       {
         role: 'system',
@@ -66,9 +81,11 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
       },
       {
         role: 'user',
-        content: p.privado
-          ? `Pedido de ${p.autorNome ?? 'alguém'} no privado: ${p.consulta}`
-          : `Pedido de ${p.autorNome ?? 'alguém'} no grupo "${p.grupoNome ?? p.grupoJid}": ${p.consulta}`,
+        content:
+          recente +
+          (p.privado
+            ? `Pedido de ${p.autorNome ?? 'alguém'} no privado: ${p.consulta}`
+            : `Pedido de ${p.autorNome ?? 'alguém'} no grupo "${p.grupoNome ?? p.grupoJid}": ${p.consulta}`),
       },
     ];
     const evidencias: string[] = [];
@@ -84,7 +101,10 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
       for (const chamada of r.toolCalls) {
         usadas.push(chamada.function.name);
         const executor = mcp?.ehMinha(chamada.function.name) ? mcp : ferramentas;
-        const saida = JSON.stringify(await executor.executar(chamada.function.name, chamada.function.arguments)).slice(0, MAX_RESULTADO);
+        const bruto = JSON.stringify(await executor.executar(chamada.function.name, chamada.function.arguments));
+        const saida = bruto.slice(0, MAX_RESULTADO);
+        // Rastro de como a Poli consultou (ferramenta, argumentos e tamanho): sem ele não dá para saber por que uma busca falhou.
+        console.log(`consulta: ${chamada.function.name} ${chamada.function.arguments.slice(0, 300)} -> ${bruto.length} caracteres${bruto.length > MAX_RESULTADO ? ' (cortado)' : ''}`);
         evidencias.push(saida);
         conversa.push({ role: 'tool', tool_call_id: chamada.id, content: saida });
       }
@@ -97,7 +117,7 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
         { role: 'system', content: promptRedatora() },
         {
           role: 'user',
-          content: `Pedido: ${p.consulta}\n\nNotas da busca:\n${notas || '(sem notas)'}\n\nEvidências:\n${evidencia || '(nenhuma busca devolveu resultado)'}`,
+          content: `${recente}Pedido: ${p.consulta}\n\nNotas da busca:\n${notas || '(sem notas)'}\n\nEvidências:\n${evidencia || '(nenhuma busca devolveu resultado)'}`,
         },
       ],
     });
