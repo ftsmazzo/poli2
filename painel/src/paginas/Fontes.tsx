@@ -149,6 +149,9 @@ function CartaoFonte({ fonte, ehAdmin, aoAtualizar, aoApagar, aoEditar }: Cartao
   const [confirmarFerramenta, setConfirmarFerramenta] = useState<Ferramenta | null>(null);
   const [confirmarApagar, setConfirmarApagar] = useState(false);
   const [ocupado, setOcupado] = useState(false);
+  // Muitas ferramentas (um MCP pode ter dezenas): começa recolhido; com poucas, já aberto.
+  const [ferramentasAbertas, setFerramentasAbertas] = useState(fonte.ferramentas.length <= 8);
+  const ligadas = fonte.ferramentas.filter((f) => f.ativa).length;
 
   async function testar() {
     setTestando(true);
@@ -286,10 +289,21 @@ function CartaoFonte({ fonte, ehAdmin, aoAtualizar, aoApagar, aoEditar }: Cartao
       )}
 
       <section aria-label={`Ferramentas da Fonte ${fonte.nome}`} className="ferramentas">
-        <h3>Ferramentas ({fonte.ferramentas.length})</h3>
+        <h3>
+          {fonte.ferramentas.length === 0 ? (
+            'Ferramentas (0)'
+          ) : (
+            <button type="button" className="ferr-titulo" aria-expanded={ferramentasAbertas} onClick={() => setFerramentasAbertas(!ferramentasAbertas)}>
+              <span className="ferr-seta" aria-hidden="true">
+                {ferramentasAbertas ? '▾' : '▸'}
+              </span>
+              Ferramentas ({fonte.ferramentas.length}) <span className="suave ferr-ligadas">· {ligadas} {ligadas === 1 ? 'ligada' : 'ligadas'}</span>
+            </button>
+          )}
+        </h3>
         {fonte.ferramentas.length === 0 ? (
           <p className="suave">Nenhuma ferramenta descoberta ainda. Use &quot;Testar&quot; para conectar e listar o que a Fonte oferece.</p>
-        ) : (
+        ) : !ferramentasAbertas ? null : (
           <ul>
             {fonte.ferramentas.map((f) => (
               <li key={f.nome}>

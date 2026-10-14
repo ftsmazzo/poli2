@@ -54,7 +54,7 @@ export function DiagnosticoPagina() {
                   <dd>
                     <SimNao valor={d.instancia.lidConhecido} />
                   </dd>
-                  <dt>Conexão com o WhatsApp</dt>
+                  <dt>Conexão</dt>
                   <dd>
                     {d.instancia.estadoConexao === 'open' ? (
                       <span className="pilula pilula-ok">

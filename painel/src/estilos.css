@@ -274,7 +274,7 @@ html[data-theme='dark'] .faixa-falha {
 }
 .lista-def {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 16px;
   margin: 0;
 }
@@ -539,7 +539,7 @@ input[aria-invalid='true'] {
   border: 1px solid currentColor;
   font-size: 12.5px;
   font-weight: 600;
-  white-space: nowrap;
+  max-width: 100%;
 }
 .pilula-ok {
   color: var(--ok);
@@ -689,6 +689,41 @@ input[aria-invalid='true'] {
 .ferr-info p {
   margin: 2px 0 0;
   overflow-wrap: anywhere;
+}
+/* Descrições longas (até 1000 caracteres) ocupam no máximo 2 linhas; o texto inteiro fica no tooltip. */
+.ferr-info p.suave {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ferramentas h3 {
+  margin: 0 0 6px;
+}
+.ferr-titulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 4px;
+  margin-left: -4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ferr-titulo:hover {
+  background: var(--panel);
+}
+.ferr-seta {
+  width: 1em;
+  text-align: center;
+}
+.ferr-ligadas {
+  font-weight: 400;
 }
 .alerta-escrita {
   display: inline-flex;

@@ -121,6 +121,35 @@ describe('tela de Fontes', () => {
     expect(screen.getByText('Pode alterar dados')).toBeInTheDocument();
   });
 
+  it('com muitas ferramentas começa recolhido, mostra quantas existem e quantas estão ligadas, e expande ao clicar', async () => {
+    const user = userEvent.setup();
+    const muitas: Fonte = {
+      ...comFerramentas,
+      ferramentas: Array.from({ length: 12 }, (_, i) => ({ nome: `ferr_${i}`, descricao: `descrição ${i}`, ativa: i >= 2, somenteLeitura: true })),
+    };
+    simularFetch(() => ({ json: [muitas] }));
+    render(<Fontes />);
+    const titulo = await screen.findByRole('button', { name: /Ferramentas \(12\)/ });
+    expect(titulo).toHaveTextContent('10 ligadas');
+    expect(titulo).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('ferr_0')).not.toBeInTheDocument();
+
+    await user.click(titulo);
+    expect(titulo).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('ferr_0')).toBeInTheDocument();
+    expect(screen.getAllByRole('switch', { name: /^Ferramenta ferr_/ })).toHaveLength(12);
+
+    await user.click(titulo);
+    expect(screen.queryByText('ferr_0')).not.toBeInTheDocument();
+  });
+
+  it('com poucas ferramentas já aparece aberto', async () => {
+    simularFetch(() => ({ json: [comFerramentas] }));
+    render(<Fontes />);
+    expect(await screen.findByText('consultar_votos')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Ferramentas \(2\)/ })).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('ligar ferramenta que escreve pede confirmação; cancelar não chama a API', async () => {
     const user = userEvent.setup();
     const chamadas = simularFetch((c) => (c.metodo === 'GET' ? { json: [comFerramentas] } : { json: { ok: true } }));
