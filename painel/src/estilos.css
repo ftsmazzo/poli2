@@ -820,7 +820,7 @@ input[aria-invalid='true'] {
   color: var(--ash);
 }
 .campo-telefone {
-  width: 170px;
+  width: 150px;
 }
 .acoes {
   display: flex;
@@ -1197,6 +1197,120 @@ input[aria-invalid='true'] {
   padding: 12px 16px;
   border-top: 1px solid var(--rule);
   background: var(--panel);
+}
+
+/* Pessoas: abas, etiquetas e os grupos de cada pessoa */
+.abas {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.aba {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--snow);
+  color: var(--graphite);
+  cursor: pointer;
+  transition: background var(--trans), border-color var(--trans);
+}
+.aba:hover {
+  background: var(--panel);
+  border-color: var(--ash);
+}
+.aba[aria-pressed='true'] {
+  background: var(--accent-bg);
+  border-color: var(--accent-bg);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.aba-n {
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ash);
+}
+.aba[aria-pressed='true'] .aba-n {
+  background: rgb(255 255 255 / 22%);
+  color: inherit;
+}
+.nome-pessoa {
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.pessoa-linha {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 0;
+}
+.pessoa-telefone {
+  margin-top: 4px;
+  font-weight: 400;
+}
+.etiqueta {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ash);
+  margin-right: 4px;
+}
+.etiqueta-poli {
+  color: var(--zap-texto);
+  border-color: var(--zap);
+}
+.chips-grupo {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 320px;
+}
+.chip-grupo {
+  font-size: 12.5px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 8px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid var(--ok);
+}
+.chip-grupo small {
+  font-size: inherit;
+  font-weight: 600;
+}
+.chip-grupo-saiu {
+  background: var(--panel);
+  color: var(--ash);
+  border: 1px dashed var(--ash);
+}
+.robo-campo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.robo-campo input {
+  min-height: 0;
+  width: 16px;
+  height: 16px;
 }
 
 /* Telas médias: o estado geral e os totais passam a uma coluna */

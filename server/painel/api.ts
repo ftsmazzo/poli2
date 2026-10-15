@@ -2,6 +2,7 @@ import express, { Router, type NextFunction, type Request, type Response } from 
 import { z } from 'zod';
 import { testarFonte, urlValida, type ConectorMcp } from '../fontes/mcp';
 import type { Db } from '../migrate';
+import { unirPessoas } from '../pessoas/unir';
 import { VALIDADE_SESSAO_MS, carregarSessao, consumirLink, encerrarSessao, type Sessao } from './auth';
 import { cifrar } from './cripto';
 
@@ -74,7 +75,9 @@ const esquemaPessoaPatch = z.object({
   papel: z.enum(['head', 'vip', 'equipe', 'outro']).optional(),
   podeComandar: z.boolean().optional(),
   podeConversar: z.boolean().optional(),
+  robo: z.boolean().optional(),
 });
+const esquemaUniao = z.object({ paraId: z.number().int().positive() });
 
 export function painelRouter(deps: DepsApi): Router {
   const { db } = deps;
@@ -319,6 +322,7 @@ export function painelRouter(deps: DepsApi): Router {
     const g = await db.query(
       `select g.id, g.jid, g.nome, g.acompanhar, g.intervalo_min, g.ultima_leitura_em, g.historico_importado_em, g.eh_heads,
               (select count(*)::int from mensagens m where m.grupo_id = g.id) as mensagens,
+              (select count(*)::int from grupo_membros gm where gm.grupo_id = g.id and gm.ativo) as membros,
               (select max(m.enviada_em) from mensagens m where m.grupo_id = g.id) as ultima_mensagem_em
        from grupos g where g.workspace_id = $1 order by ultima_mensagem_em desc nulls last, g.id`,
       [ctx(res).workspaceId],
@@ -333,6 +337,7 @@ export function painelRouter(deps: DepsApi): Router {
         ultimaLeituraEm: x.ultima_leitura_em,
         historicoImportadoEm: x.historico_importado_em,
         mensagens: x.mensagens,
+        membros: x.membros,
         ultimaMensagemEm: x.ultima_mensagem_em,
       })),
     );
@@ -380,8 +385,10 @@ export function painelRouter(deps: DepsApi): Router {
 
   r.get('/pessoas', exigir(), async (_req, res) => {
     const p = await db.query(
-      `select p.id, p.nome, p.telefone, p.jid, p.papel, p.pode_comandar, p.pode_conversar,
-              (select count(*)::int from mensagens m where m.autor_pessoa_id = p.id) as mensagens
+      `select p.id, p.nome, p.telefone, p.jid, p.papel, p.pode_comandar, p.pode_conversar, p.tipo_conta,
+              (select count(*)::int from mensagens m where m.autor_pessoa_id = p.id) as mensagens,
+              coalesce((select json_agg(json_build_object('id', g.id, 'nome', coalesce(g.nome, g.jid), 'admin', gm.admin, 'ativo', gm.ativo) order by gm.ativo desc, g.nome)
+                        from grupo_membros gm join grupos g on g.id = gm.grupo_id where gm.pessoa_id = p.id), '[]'::json) as grupos
        from pessoas p where p.workspace_id = $1 order by p.pode_comandar desc, mensagens desc, p.id`,
       [ctx(res).workspaceId],
     );
@@ -393,9 +400,32 @@ export function painelRouter(deps: DepsApi): Router {
         papel: x.papel,
         podeComandar: x.pode_comandar,
         podeConversar: x.pode_conversar,
+        tipoConta: x.tipo_conta,
         mensagens: x.mensagens,
+        // Em quais grupos a pessoa está agora ("ativo") ou já esteve.
+        grupos: (Array.isArray(x.grupos) ? x.grupos : []).map((g: { id: number | string; nome: string; admin: boolean; ativo: boolean }) => ({
+          id: Number(g.id),
+          nome: g.nome,
+          admin: g.admin,
+          ativo: g.ativo,
+        })),
       })),
     );
+  });
+
+  // Une dois cadastros da mesma pessoa (ex.: o do número e o que veio só pelo nome numa conversa exportada).
+  r.post('/pessoas/:id/unir', exigir(true), async (req, res) => {
+    const p = esquemaUniao.safeParse(req.body);
+    if (!p.success) {
+      res.status(400).json({ erro: 'dados_invalidos', detalhe: p.error.issues[0]?.message });
+      return;
+    }
+    const unidas = await unirPessoas(db, ctx(res).workspaceId, idDaRota(req), p.data.paraId);
+    if (!unidas) {
+      res.status(404).json({ erro: 'nao_encontrada' });
+      return;
+    }
+    res.json({ ok: true });
   });
 
   r.patch('/pessoas/:id', exigir(true), async (req, res) => {
@@ -415,6 +445,11 @@ export function painelRouter(deps: DepsApi): Router {
     if (p.data.papel !== undefined) campo('papel', p.data.papel);
     if (p.data.podeComandar !== undefined) campo('pode_comandar', p.data.podeComandar);
     if (p.data.podeConversar !== undefined) campo('pode_conversar', p.data.podeConversar);
+    // "Robô" (outra automação no grupo, como a Poli da versão 1). A própria Poli não pode ser mudada.
+    if (p.data.robo !== undefined) {
+      params.push(p.data.robo ? 'robo' : 'pessoa');
+      sets.push(`tipo_conta = case when tipo_conta = 'esta_poli' then tipo_conta else $${params.length} end`);
+    }
     if (sets.length === 0) {
       res.status(400).json({ erro: 'nada_para_mudar' });
       return;

@@ -113,11 +113,29 @@ export async function buscarMensagens(
   return { registros, paginas };
 }
 
-// Participantes de todos os grupos. Conforme a versão da Evolution, cada um traz LID, telefone ou os dois.
-export async function listarParticipantes(cfg: EvolutionCfg, instancia: string, f: Fetcher = fetch): Promise<any[]> {
+export interface GrupoComParticipantes {
+  jid: string;
+  nome: string | null;
+  // Conforme a versão da Evolution, cada participante traz LID, telefone ou os dois, e se é administrador.
+  participantes: any[];
+}
+
+// Os grupos de que o número participa, cada um com a lista de quem está nele AGORA.
+export async function listarGruposComParticipantes(cfg: EvolutionCfg, instancia: string, f: Fetcher = fetch): Promise<GrupoComParticipantes[]> {
   const dados = await chamar(cfg, f, `/group/fetchAllGroups/${encodeURIComponent(instancia)}?getParticipants=true`, {}, 60_000);
   const grupos: any[] = Array.isArray(dados) ? dados : [];
-  return grupos.flatMap((g) => (Array.isArray(g?.participants) ? g.participants : []));
+  return grupos
+    .map((g) => ({
+      jid: String(g?.id ?? ''),
+      nome: typeof g?.subject === 'string' && g.subject ? (g.subject as string) : null,
+      participantes: Array.isArray(g?.participants) ? (g.participants as any[]) : [],
+    }))
+    .filter((g) => g.jid.endsWith('@g.us'));
+}
+
+// Participantes de todos os grupos, sem separar por grupo.
+export async function listarParticipantes(cfg: EvolutionCfg, instancia: string, f: Fetcher = fetch): Promise<any[]> {
+  return (await listarGruposComParticipantes(cfg, instancia, f)).flatMap((g) => g.participantes);
 }
 
 // Pergunta à Evolution como o WhatsApp conhece um número (algumas versões devolvem o LID).

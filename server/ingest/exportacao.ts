@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import type { Db } from '../migrate';
+import { nomeNormalizado } from '../pessoas/unir';
 import type { TipoMensagem } from './evolution';
 
 export interface LinhaExportada {
@@ -130,7 +131,10 @@ const MINUTO = 60_000;
 // Importa uma exportação para o grupo. É idempotente: reimportar o mesmo arquivo não duplica nada,
 // e o que o webhook já gravou (mesmo texto na mesma hora, com 1 minuto de folga) é reconhecido e pulado.
 export async function importarExportacao(db: Db, p: ParamsImportacao): Promise<ResultadoImportacao> {
-  const linhas = parseExportacao(p.texto);
+  // Os avisos do sistema ("mensagens protegidas por criptografia...", "fulano criou o grupo") chegam no arquivo com o
+  // NOME DO GRUPO como autor. Não são de ninguém: ficam de fora, para não virarem uma "pessoa" com o nome do grupo.
+  const nomeDoGrupo = (await db.query('select nome from grupos where id = $1', [p.grupoId])).rows[0]?.nome ?? null;
+  const linhas = parseExportacao(p.texto).filter((l) => !nomeDoGrupo || nomeNormalizado(l.autor) !== nomeNormalizado(nomeDoGrupo));
   const resultado: ResultadoImportacao = { linhas: linhas.length, gravadas: 0, jaExistiam: 0 };
   if (linhas.length === 0) return resultado;
 
@@ -151,11 +155,13 @@ export async function importarExportacao(db: Db, p: ParamsImportacao): Promise<R
 
   const pessoas = new Map<string, { id: number; jid: string | null }>();
   async function pessoaPorNome(nome: string) {
-    const chave = nome.toLowerCase();
+    const chave = nomeNormalizado(nome);
     const cache = pessoas.get(chave);
     if (cache) return cache;
+    // Liga o autor à pessoa REAL de mesmo nome (a que tem número no WhatsApp), ignorando o "~" que o WhatsApp põe
+    // antes de quem não está nos contatos. Só cria um cadastro novo quando não existe ninguém com esse nome.
     const achada = await db.query(
-      'select id, jid from pessoas where workspace_id = $1 and lower(nome) = $2 order by id limit 1',
+      `select id, jid from pessoas where workspace_id = $1 and lower(regexp_replace(nome, '^[~\\s]+', '')) = $2 order by (jid is null), id limit 1`,
       [p.workspaceId, chave],
     );
     let pessoa: { id: number; jid: string | null };
@@ -164,7 +170,7 @@ export async function importarExportacao(db: Db, p: ParamsImportacao): Promise<R
     } else {
       const nova = await db.query(
         `insert into pessoas (workspace_id, nome, papel) values ($1, $2, 'outro') returning id`,
-        [p.workspaceId, nome],
+        [p.workspaceId, nome.replace(/^[~\s]+/, '').trim()],
       );
       pessoa = { id: nova.rows[0].id, jid: null };
     }

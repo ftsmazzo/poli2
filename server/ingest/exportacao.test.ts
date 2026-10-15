@@ -140,6 +140,30 @@ describe('importarExportacao', () => {
     expect(m.rows[0].autor_jid).toBe('5596999990000@s.whatsapp.net');
   });
 
+  it('ignora os avisos do sistema, que vêm com o nome do grupo como autor, e não cria "pessoa" com o nome do grupo', async () => {
+    const texto = ['12/10/2026 09:00 - Grupo A: As mensagens e ligações são protegidas com a criptografia de ponta a ponta.', '12/10/2026 09:01 - Fulano: bom dia'].join('\n');
+    const r = await importarExportacao(db, params(texto));
+    expect(r).toMatchObject({ linhas: 1, gravadas: 1 });
+    expect((await db.query<{ nome: string }>('select nome from pessoas order by id')).rows).toEqual([{ nome: 'Fulano' }]);
+  });
+
+  it('liga o autor à pessoa real de mesmo nome (a que tem número), ignorando o "~" do WhatsApp, em vez de criar outro cadastro', async () => {
+    await db.query(`insert into pessoas (workspace_id, nome, papel) values (1, 'Beltrano', 'outro')`); // cadastro antigo, só pelo nome
+    await db.query(`insert into pessoas (workspace_id, jid, nome, telefone, papel) values (1, '5511999990000@s.whatsapp.net', 'Beltrano', '5511999990000', 'head')`);
+    const texto = ['12/10/2026 09:01 - ~Beltrano: oi', '12/10/2026 09:02 - Beltrano: tudo bem?'].join('\n');
+    await importarExportacao(db, params(texto));
+    const m = await db.query<{ telefone: string | null; n: string }>(
+      `select p.telefone, count(*)::text as n from mensagens m join pessoas p on p.id = m.autor_pessoa_id group by p.telefone`,
+    );
+    expect(m.rows).toEqual([{ telefone: '5511999990000', n: '2' }]);
+    expect((await db.query<{ n: string }>('select count(*)::text as n from pessoas')).rows[0].n).toBe('2');
+  });
+
+  it('autor novo entra sem o "~" no nome', async () => {
+    await importarExportacao(db, params('12/10/2026 09:01 - ~Fernanda: oi'));
+    expect((await db.query<{ nome: string }>('select nome from pessoas')).rows).toEqual([{ nome: 'Fernanda' }]);
+  });
+
   it('devolve zeros para um arquivo sem mensagens', async () => {
     expect(await importarExportacao(db, params('nada aqui'))).toEqual({ linhas: 0, gravadas: 0, jaExistiam: 0 });
   });

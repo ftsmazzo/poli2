@@ -281,6 +281,63 @@ describe('API do painel', () => {
       expect((await chamar('/grupos/1', { metodo: 'PATCH', cookie, corpo: { acompanhar: true } })).status).toBe(200);
     });
 
+    it('lista cada pessoa com os grupos em que está (agora ou antes) e cada grupo com o total de membros', async () => {
+      const cookie = await entrar(1);
+      await db.query(`insert into grupos (workspace_id, jid, nome) values (1, '1@g.us', 'Inteligência Eleitoral'), (1, '2@g.us', 'Heads')`);
+      await db.query(`insert into pessoas (workspace_id, jid, nome, telefone, papel) values (1, '5511987654321@s.whatsapp.net', 'Ary', '5511987654321', 'head'), (1, '5511955550001@s.whatsapp.net', 'Léo', '5511955550001', 'outro')`);
+      await db.query(`insert into grupo_membros (grupo_id, pessoa_id, ativo, admin) values (1, 1, true, true), (2, 1, true, false), (1, 2, false, false)`);
+
+      const pessoas = (await chamar('/pessoas', { cookie })).corpo;
+      const ary = pessoas.find((p: any) => p.nome === 'Ary');
+      expect(ary.tipoConta).toBe('pessoa');
+      expect(ary.grupos).toEqual([
+        { id: 2, nome: 'Heads', admin: false, ativo: true },
+        { id: 1, nome: 'Inteligência Eleitoral', admin: true, ativo: true },
+      ]);
+      expect(pessoas.find((p: any) => p.nome === 'Léo').grupos).toEqual([{ id: 1, nome: 'Inteligência Eleitoral', admin: false, ativo: false }]);
+
+      const grupos = (await chamar('/grupos', { cookie })).corpo;
+      expect(grupos.find((g: any) => g.nome === 'Inteligência Eleitoral').membros).toBe(1); // o Léo saiu
+      expect(grupos.find((g: any) => g.nome === 'Heads').membros).toBe(1);
+    });
+
+    it('marca e desmarca "robô"; a própria Poli não pode ser mudada', async () => {
+      const cookie = await entrar(1);
+      await db.query(`insert into pessoas (workspace_id, nome, tipo_conta) values (1, 'Poli', 'pessoa'), (1, 'MapSolar', 'esta_poli')`);
+      const tipo = async (nome: string) => (await chamar('/pessoas', { cookie })).corpo.find((p: any) => p.nome === nome).tipoConta;
+      const id = async (nome: string) => (await chamar('/pessoas', { cookie })).corpo.find((p: any) => p.nome === nome).id;
+
+      await chamar(`/pessoas/${await id('Poli')}`, { metodo: 'PATCH', cookie, corpo: { robo: true } });
+      expect(await tipo('Poli')).toBe('robo');
+      await chamar(`/pessoas/${await id('Poli')}`, { metodo: 'PATCH', cookie, corpo: { robo: false } });
+      expect(await tipo('Poli')).toBe('pessoa');
+
+      await chamar(`/pessoas/${await id('MapSolar')}`, { metodo: 'PATCH', cookie, corpo: { robo: true } });
+      expect(await tipo('MapSolar')).toBe('esta_poli');
+    });
+
+    it('une dois cadastros da mesma pessoa (só administrador), sem tocar em pessoa de outro tenant', async () => {
+      const cookie = await entrar(1);
+      await db.query(`insert into grupos (workspace_id, jid, nome) values (1, '1@g.us', 'IE')`);
+      await db.query(`insert into pessoas (workspace_id, jid, nome, telefone) values (1, '5511987654321@s.whatsapp.net', 'Ary', '5511987654321')`);
+      await db.query(`insert into pessoas (workspace_id, nome) values (1, 'Milestone')`);
+      await db.query(`insert into pessoas (workspace_id, nome) values (2, 'De outro tenant')`);
+      await db.query(`insert into mensagens (workspace_id, grupo_id, wa_message_id, autor_pessoa_id, enviada_em, texto) values (1, 1, 'M1', 2, now(), 'oi')`);
+      const ids = (await db.query<{ id: number; nome: string }>('select id, nome from pessoas order by id')).rows;
+      const [ary, milestone, deOutro] = ids.map((x) => Number(x.id));
+
+      expect((await chamar(`/pessoas/${milestone}/unir`, { metodo: 'POST', cookie, corpo: { paraId: deOutro } })).status).toBe(404);
+      expect((await chamar(`/pessoas/${milestone}/unir`, { metodo: 'POST', cookie, corpo: { paraId: 'x' } })).status).toBe(400);
+
+      expect((await chamar(`/pessoas/${milestone}/unir`, { metodo: 'POST', cookie, corpo: { paraId: ary } })).status).toBe(200);
+      const lista = (await chamar('/pessoas', { cookie })).corpo;
+      expect(lista.map((p: any) => p.nome)).toEqual(['Ary']);
+      expect(lista[0].mensagens).toBe(1);
+
+      await db.query(`update usuario_workspaces set papel = 'head'`);
+      expect((await chamar(`/pessoas/${ary}/unir`, { metodo: 'POST', cookie, corpo: { paraId: ary + 99 } })).status).toBe(403);
+    });
+
     it('só o administrador escolhe o Grupo dos Heads; o Head comum não', async () => {
       const cookie = await entrar(1);
       await db.query(`insert into grupos (workspace_id, jid, nome) values (1, '1@g.us', 'IE'), (1, '2@g.us', 'Heads')`);

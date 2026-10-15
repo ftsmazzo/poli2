@@ -1,8 +1,17 @@
 import { chaveNumero, numeroDe } from '../agente/pedido';
 import type { Db } from '../migrate';
-import { consultarNumeros, listarParticipantes, type EvolutionCfg } from './client';
+import { unificarPessoas } from '../pessoas/unir';
+import { consultarNumeros, listarGruposComParticipantes, type EvolutionCfg } from './client';
+import { marcarEstaPoli, sincronizarMembros, type GrupoLido } from './membros';
+
+// Administrador do grupo: cada versão da Evolution marca de um jeito.
+const ehAdmin = (p: any): boolean => p?.admin === 'admin' || p?.admin === 'superadmin' || p?.isAdmin === true || p?.isSuperAdmin === true;
 
 export interface ResultadoIdentificadores {
+  // Quantos membros foram vinculados a grupos, quantos saíram e quantos cadastros duplicados foram unidos.
+  membros?: number;
+  saidas?: number;
+  unidas?: number;
   participantes: number;
   comLid: number;
   comTelefone: number;
@@ -67,7 +76,8 @@ export async function descobrirIdentificadores(
   const proprio = numeroDe(inst.rows[0].jid_proprio);
   const chaveProprio = proprio ? chaveNumero(proprio) : null;
 
-  const participantes = await listarParticipantes(evo, instancia, f);
+  const gruposDaEvolution = await listarGruposComParticipantes(evo, instancia, f);
+  const participantes = gruposDaEvolution.flatMap((g) => g.participantes);
   r.participantes = participantes.length;
   const campos = new Set<string>();
   const vistos = new Set<string>();
@@ -113,5 +123,16 @@ export async function descobrirIdentificadores(
       [instancia, r.lidProprio],
     );
   }
+
+  // Quem está em cada grupo agora (e quem saiu), a Poli marcada como "esta Poli" e os cadastros duplicados unidos.
+  const lidos: GrupoLido[] = gruposDaEvolution.map((g) => ({
+    jid: g.jid,
+    membros: g.participantes.map((p) => ({ ...parDoParticipante(p), admin: ehAdmin(p) })),
+  }));
+  const m = await sincronizarMembros(db, workspaceId, lidos);
+  r.membros = m.membros;
+  r.saidas = m.saidas;
+  await marcarEstaPoli(db, workspaceId, proprio || null, r.lidProprio);
+  r.unidas = (await unificarPessoas(db, workspaceId)).unidas;
   return r;
 }

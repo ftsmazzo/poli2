@@ -223,7 +223,8 @@ async function sincronizarEvolution(): Promise<void> {
           const resumo =
             `participantes ${i.participantes}; com LID ${i.comLid}; com telefone ${i.comTelefone}; pares aprendidos ${i.pares}; ` +
             `comandantes presentes nos grupos: ${i.comandantesPresentes} de ${cfg.comandantes.length}; ` +
-            `campos [${i.campos.join(',')}]; LID próprio: ${i.lidProprio ? `encontrado (${i.via})` : 'NÃO encontrado'}`;
+            `campos [${i.campos.join(',')}]; LID próprio: ${i.lidProprio ? `encontrado (${i.via})` : 'NÃO encontrado'}; ` +
+            `membros vinculados a grupos: ${i.membros ?? 0}; saíram: ${i.saidas ?? 0}; cadastros duplicados unidos: ${i.unidas ?? 0}`;
           if (ultimoResumoIdentificadores.get(nome) !== resumo) {
             ultimoResumoIdentificadores.set(nome, resumo);
             console.log(`identificadores ${nome}: ${resumo}`);

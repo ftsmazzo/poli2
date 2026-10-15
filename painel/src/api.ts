@@ -65,9 +65,20 @@ export interface Grupo {
   ultimaLeituraEm: string | null;
   historicoImportadoEm: string | null;
   mensagens: number;
+  /** Quantas pessoas estão no grupo agora (lista oficial do WhatsApp). Opcional: servidores antigos não mandam. */
+  membros?: number;
   ultimaMensagemEm: string | null;
 }
 export type PapelPessoa = 'head' | 'vip' | 'equipe' | 'outro';
+/** "esta_poli" é o número da própria Poli; "robo" é outra automação no grupo (ex.: a Poli da versão 1). */
+export type TipoConta = 'pessoa' | 'esta_poli' | 'robo';
+export interface GrupoDaPessoa {
+  id: number;
+  nome: string;
+  admin: boolean;
+  /** true = está no grupo agora; false = já esteve e saiu. */
+  ativo: boolean;
+}
 export interface Pessoa {
   id: number;
   nome: string | null;
@@ -76,6 +87,8 @@ export interface Pessoa {
   podeComandar: boolean;
   podeConversar: boolean;
   mensagens: number;
+  tipoConta?: TipoConta;
+  grupos?: GrupoDaPessoa[];
 }
 export interface PessoaPatch {
   nome?: string;
@@ -83,6 +96,7 @@ export interface PessoaPatch {
   papel?: PapelPessoa;
   podeComandar?: boolean;
   podeConversar?: boolean;
+  robo?: boolean;
 }
 export interface Alerta {
   id: number;
@@ -266,6 +280,8 @@ export const api = {
 
   pessoas: () => chamar<Pessoa[]>('GET', '/pessoas'),
   editarPessoa: (id: number, d: PessoaPatch) => chamar<{ ok: true }>('PATCH', `/pessoas/${id}`, { corpo: d }),
+  /** Une o cadastro "id" ao cadastro "paraId" (a mesma pessoa que apareceu duas vezes). */
+  unirPessoa: (id: number, paraId: number) => chamar<{ ok: true }>('POST', `/pessoas/${id}/unir`, { corpo: { paraId } }),
 
   alertas: () => chamar<Alerta[]>('GET', '/alertas'),
 };

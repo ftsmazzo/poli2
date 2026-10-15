@@ -59,6 +59,9 @@ export function Grupos() {
                   <th scope="col" className="num">
                     Mensagens
                   </th>
+                  <th scope="col" className="num">
+                    Membros
+                  </th>
                   <th scope="col">Última mensagem</th>
                   <th scope="col">Última leitura</th>
                   <th scope="col">Histórico</th>
@@ -74,6 +77,7 @@ export function Grupos() {
                     <tr key={g.id}>
                       <th scope="row">{g.nome}</th>
                       <td className="num">{numero(g.mensagens)}</td>
+                      <td className="num">{g.membros === undefined ? <span className="suave">—</span> : numero(g.membros)}</td>
                       <td>
                         <Quando iso={g.ultimaMensagemEm} vazio="sem mensagens" />
                       </td>
