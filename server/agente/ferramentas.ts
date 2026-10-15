@@ -1,4 +1,5 @@
 import type { Db } from '../migrate';
+import { comoVetor, type Embedder } from '../busca/embeddings';
 import type { EspecFerramenta } from './llm';
 
 const FUSO = 'America/Belem';
@@ -59,7 +60,11 @@ export interface Ferramentas {
   executar(nome: string, argumentosJson: string): Promise<unknown>;
 }
 
-export function criarFerramentas(db: Db, workspaceId: number): Ferramentas {
+// Quantas conversas parecidas voltam, e o quanto precisam se parecer (0 a 1) para valer a pena mostrar.
+const TRECHOS_PARECIDOS = 5;
+const PARECIDO_MINIMO = 0.25;
+
+export function criarFerramentas(db: Db, workspaceId: number, embed?: Embedder): Ferramentas {
   const filtrosComuns = (c: Consulta, a: any, colunaData: string, colunaGrupo: string) => {
     if (typeof a.grupo === 'string' && a.grupo.trim()) c.onde(`${colunaGrupo} ilike ${c.param(`%${a.grupo.trim()}%`)}`);
     const de = instante(a.de);
@@ -103,10 +108,43 @@ export function criarFerramentas(db: Db, workspaceId: number): Ferramentas {
     // Busca por palavra inteira (português, com radical); se nada vier, busca por pedaço de palavra.
     let rows = await rodar('texto');
     if (rows.length === 0) rows = await rodar('parte');
-    return {
-      total: rows.length,
-      mensagens: rows.map((r) => ({ id: Number(r.id), grupo: r.grupo, autor: r.autor, quando: formatarQuando(r.enviada_em), texto: r.texto })),
-    };
+    const mensagens = rows.map((r) => ({ id: Number(r.id), grupo: r.grupo, autor: r.autor, quando: formatarQuando(r.enviada_em), texto: r.texto }));
+    if (!embed) return { total: rows.length, mensagens };
+    // Busca por significado: acha a conversa mesmo sem a palavra exata. Se falhar, a busca por palavras segue valendo.
+    let trechosParecidos: unknown[] = [];
+    try {
+      trechosParecidos = await buscarTrechos(a);
+    } catch (err) {
+      console.error('busca por significado falhou:', err instanceof Error ? err.message : err);
+    }
+    return { total: rows.length, mensagens, trechos_parecidos: trechosParecidos };
+  }
+
+  // Conversas (janelas de mensagens seguidas) parecidas em significado com a consulta, da mais parecida à menos.
+  async function buscarTrechos(a: any) {
+    const [vetor] = await embed!([String(a.consulta).slice(0, 2000)]);
+    const c = new Consulta();
+    c.onde(`j.workspace_id = ${c.param(workspaceId)}`);
+    c.onde('j.embedding is not null');
+    filtrosComuns(c, a, 'j.inicio_em', 'g.nome');
+    const v = c.param(comoVetor(vetor));
+    const r = await db.query(
+      `select j.de_msg_id, g.nome as grupo, j.inicio_em, j.texto, 1 - (j.embedding <=> ${v}::vector) as parecido
+       from janelas j join grupos g on g.id = j.grupo_id
+       where ${c.where}
+       order by j.embedding <=> ${v}::vector
+       limit ${c.param(TRECHOS_PARECIDOS)}`,
+      c.params,
+    );
+    return r.rows
+      .filter((x) => Number(x.parecido) >= PARECIDO_MINIMO)
+      .map((x) => ({
+        grupo: x.grupo,
+        quando: formatarQuando(x.inicio_em),
+        parecido: Math.round(Number(x.parecido) * 100) / 100,
+        mensagem_id: Number(x.de_msg_id),
+        texto: String(x.texto).slice(0, 1500),
+      }));
   }
 
   async function buscarItens(a: any) {
@@ -233,7 +271,8 @@ export function criarFerramentas(db: Db, workspaceId: number): Ferramentas {
       type: 'function',
       function: {
         name: 'buscar_mensagens',
-        description: 'Busca mensagens dos grupos por assunto ou palavras. Devolve as mais relevantes, com autor, data e id.',
+        description:
+          'Busca mensagens dos grupos por assunto ou palavras. Devolve as mais relevantes, com autor, data e id. Também devolve "trechos_parecidos": conversas inteiras que falam do mesmo assunto mesmo com outras palavras (use quando as mensagens exatas não aparecerem ou para entender o contexto).',
         parameters: objeto({ consulta: { type: 'string', description: 'Palavras-chave do assunto.' }, ...comuns }, ['consulta']),
       },
     },

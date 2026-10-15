@@ -1,3 +1,4 @@
+import type { Embedder } from '../busca/embeddings';
 import { ferramentasMcp, type ConectorMcp, type FerramentasMcp } from '../fontes/mcp';
 import type { Db } from '../migrate';
 import { criarFerramentas } from './ferramentas';
@@ -15,6 +16,8 @@ export interface DepsTurno {
   // Fontes MCP cadastradas no painel. Sem os dois, o agente usa só as mensagens dos grupos.
   conectorMcp?: ConectorMcp;
   chaveCripto?: string;
+  // Busca por significado nas conversas. Sem ele, só a busca por palavras.
+  embed?: Embedder;
 }
 
 const MAX_PASSOS = 6;
@@ -48,7 +51,7 @@ export async function responderPedido(deps: DepsTurno, p: Pedido): Promise<Situa
   let mcp: FerramentasMcp | null = null;
 
   try {
-    const ferramentas = criarFerramentas(db, p.workspaceId);
+    const ferramentas = criarFerramentas(db, p.workspaceId, deps.embed);
     if (deps.conectorMcp) {
       const grupo = await db.query('select id from grupos where workspace_id = $1 and jid = $2', [p.workspaceId, p.grupoJid]);
       // Sem chave, só as Fontes sem segredo funcionam (decifrar o resto falha com erro claro).

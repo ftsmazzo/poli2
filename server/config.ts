@@ -19,6 +19,8 @@ export interface Config {
   openrouterKey?: string;
   modeloOrquestrador: string;
   modeloRedatora: string;
+  // Modelo que transforma conversas em vetores (1536 números) para a busca por significado.
+  modeloEmbed: string;
   // Números que podem pedir coisas à Poli (só dígitos, com DDI). Vem do ambiente: nunca fica no repositório.
   comandantes: string[];
   // Endereço público do painel, usado no link que a Poli manda por WhatsApp.
@@ -39,6 +41,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     openrouterKey: lerEnv(env, 'OPENROUTER_API_KEY'),
     modeloOrquestrador: lerEnv(env, 'OPENROUTER_ORCH_MODEL') ?? 'anthropic/claude-haiku-5.5',
     modeloRedatora: lerEnv(env, 'OPENROUTER_REDATORA_MODEL') ?? 'anthropic/claude-sonnet-5.5',
+    modeloEmbed: lerEnv(env, 'OPENROUTER_EMBED_MODEL') ?? 'openai/text-embedding-3-small',
     comandantes: normalizarComandantes((lerEnv(env, 'COMANDANTES') ?? '').split(/[,;\s]+/)),
     appUrl: (lerEnv(env, 'APP_URL') ?? 'https://poli2-app.kxryyk.easypanel.host').replace(/\/+$/, ''),
     chaveCripto: lerEnv(env, 'ENCRYPTION_KEY'),

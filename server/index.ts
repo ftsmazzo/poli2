@@ -11,6 +11,8 @@ import { enviarPendentes, reprocessarSemDestino } from './alertas/envio';
 import { lerGruposVencidos } from './alertas/leitura';
 import { criarChatOpenRouter } from './agente/llm';
 import { avaliarPedido, avaliarPrivado, type Avaliacao } from './agente/pedido';
+import { criarEmbedderOpenRouter } from './busca/embeddings';
+import { indexarJanelas } from './busca/janelas';
 import { responderPedido } from './agente/turno';
 import { enviarTexto } from './evolution/client';
 import type { MensagemNormalizada, MensagemPrivada } from './ingest/evolution';
@@ -89,6 +91,7 @@ async function atender(db: Db, avaliacao: Avaliacao, texto: string | null): Prom
       enviar,
       conectorMcp: conectorReal,
       chaveCripto: cfg.chaveCripto,
+      embed: criarEmbedderOpenRouter(cfg.openrouterKey, cfg.modeloEmbed),
     },
     avaliacao.pedido,
   );
@@ -277,6 +280,23 @@ async function lerGrupos(): Promise<void> {
   }
 }
 
+const LOCK_VETORES = 8421007;
+const INTERVALO_VETORES_MS = 60_000;
+
+// A cada minuto, transforma as conversas novas em vetores (janelas de mensagens), para a busca por significado.
+async function indexarConversas(): Promise<void> {
+  if (!pool || !cfg.openrouterKey) return;
+  const embed = criarEmbedderOpenRouter(cfg.openrouterKey, cfg.modeloEmbed);
+  try {
+    await comLockTentativa(pool, LOCK_VETORES, async (db) => {
+      const r = await indexarJanelas(db, embed);
+      if (r.janelas) console.log(`busca por significado: ${r.janelas} janela(s) de conversa indexada(s)`);
+    });
+  } catch (err) {
+    console.error('indexação das conversas falhou:', err instanceof Error ? err.message : err);
+  }
+}
+
 const LOCK_ENVIO = 8421006;
 const INTERVALO_ENVIO_MS = 30_000;
 
@@ -310,6 +330,8 @@ function iniciarSincronizacao(): void {
   setInterval(() => void extrairItens(), INTERVALO_EXTRACAO_MS);
   void lerGrupos();
   setInterval(() => void lerGrupos(), INTERVALO_LEITURA_MS);
+  void indexarConversas();
+  setInterval(() => void indexarConversas(), INTERVALO_VETORES_MS);
   if (!cfg.evolutionUrl || !cfg.evolutionApiKey || !cfg.webhookToken) {
     console.warn('Sincronização com a Evolution desligada: faltam EVOLUTION_URL, EVOLUTION_API_KEY ou EVOLUTION_WEBHOOK_TOKEN.');
     return;
