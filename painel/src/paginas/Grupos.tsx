@@ -61,9 +61,9 @@ export function Grupos() {
                   </th>
                   <th scope="col">Última mensagem</th>
                   <th scope="col">Última leitura</th>
-                  <th scope="col">Histórico importado</th>
+                  <th scope="col">Histórico</th>
                   <th scope="col">Acompanhar</th>
-                  <th scope="col">Intervalo de leitura</th>
+                  <th scope="col">Lê a cada</th>
                   <th scope="col">Grupo dos Heads</th>
                 </tr>
               </thead>
@@ -84,7 +84,7 @@ export function Grupos() {
                         <Quando iso={g.historicoImportadoEm} vazio="não" />
                       </td>
                       <td>
-                        <Switch rotulo={`Acompanhar o grupo ${g.nome}`} checked={g.acompanhar} onChange={(v) => void mudar(g, { acompanhar: v })} />
+                        <Switch semTexto rotulo={`Acompanhar o grupo ${g.nome}`} checked={g.acompanhar} onChange={(v) => void mudar(g, { acompanhar: v })} />
                       </td>
                       <td>
                         <select aria-label={`Intervalo de leitura do grupo ${g.nome}`} value={g.intervaloMin} onChange={(e) => void mudar(g, { intervaloMin: Number(e.target.value) })}>
@@ -96,7 +96,7 @@ export function Grupos() {
                         </select>
                       </td>
                       <td>
-                        <Switch rotulo={`Usar o grupo ${g.nome} como Grupo dos Heads, que recebe os alertas`} checked={g.grupoDosHeads} onChange={(v) => void mudar(g, { grupoDosHeads: v })} />
+                        <Switch semTexto rotulo={`Usar o grupo ${g.nome} como Grupo dos Heads, que recebe os alertas`} checked={g.grupoDosHeads} onChange={(v) => void mudar(g, { grupoDosHeads: v })} />
                       </td>
                     </tr>
                   );

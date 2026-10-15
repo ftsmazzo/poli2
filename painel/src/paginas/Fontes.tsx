@@ -152,6 +152,9 @@ function CartaoFonte({ fonte, ehAdmin, aoAtualizar, aoApagar, aoEditar }: Cartao
   // Muitas ferramentas (um MCP pode ter dezenas): começa recolhido; com poucas, já aberto.
   const [ferramentasAbertas, setFerramentasAbertas] = useState(fonte.ferramentas.length <= 8);
   const ligadas = fonte.ferramentas.filter((f) => f.ativa).length;
+  const [filtro, setFiltro] = useState('');
+  const termo = filtro.trim().toLowerCase();
+  const visiveis = termo ? fonte.ferramentas.filter((f) => `${f.nome} ${f.descricao ?? ''}`.toLowerCase().includes(termo)) : fonte.ferramentas;
 
   async function testar() {
     setTestando(true);
@@ -228,26 +231,34 @@ function CartaoFonte({ fonte, ehAdmin, aoAtualizar, aoApagar, aoEditar }: Cartao
         </div>
       </header>
 
-      <dl className="lista-def compacta">
-        <dt>Latência</dt>
-        <dd>{fonte.latenciaMs !== null ? `${numero(fonte.latenciaMs)} ms` : '—'}</dd>
-        <dt>Último teste</dt>
-        <dd>
-          <Quando iso={fonte.ultimoTesteEm} vazio="nunca testada" />
-        </dd>
-        <dt>Segredo</dt>
-        <dd>{fonte.temSegredo ? 'Guardado (não exibido)' : 'Nenhum'}</dd>
+      <dl className="meta-fonte">
+        <div>
+          <dt>Latência</dt>
+          <dd>{fonte.latenciaMs !== null ? `${numero(fonte.latenciaMs)} ms` : '—'}</dd>
+        </div>
+        <div>
+          <dt>Último teste</dt>
+          <dd>
+            <Quando iso={fonte.ultimoTesteEm} vazio="nunca testada" />
+          </dd>
+        </div>
+        <div>
+          <dt>Segredo</dt>
+          <dd>{fonte.temSegredo ? 'Guardado (não exibido)' : 'Nenhum'}</dd>
+        </div>
         {fonte.quandoUsar && (
-          <>
+          <div className="meta-larga">
             <dt>Quando usar</dt>
-            <dd>{fonte.quandoUsar}</dd>
-          </>
+            <dd className="texto-resumido" title={fonte.quandoUsar}>
+              {fonte.quandoUsar}
+            </dd>
+          </div>
         )}
         {fonte.ultimoErro && (
-          <>
+          <div className="meta-larga">
             <dt>Último erro</dt>
             <dd className="erro-texto">{fonte.ultimoErro}</dd>
-          </>
+          </div>
         )}
       </dl>
 
@@ -304,8 +315,20 @@ function CartaoFonte({ fonte, ehAdmin, aoAtualizar, aoApagar, aoEditar }: Cartao
         {fonte.ferramentas.length === 0 ? (
           <p className="suave">Nenhuma ferramenta descoberta ainda. Use &quot;Testar&quot; para conectar e listar o que a Fonte oferece.</p>
         ) : !ferramentasAbertas ? null : (
+          <>
+            {fonte.ferramentas.length > 8 && (
+              <div className="ferr-busca">
+                <input type="search" value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar ferramenta" aria-label={`Buscar ferramenta da Fonte ${fonte.nome}`} />
+                {filtro.trim() && (
+                  <span className="suave">
+                    {visiveis.length} de {fonte.ferramentas.length}
+                  </span>
+                )}
+              </div>
+            )}
+            {visiveis.length === 0 && <p className="suave">Nenhuma ferramenta combina com &quot;{filtro.trim()}&quot;.</p>}
           <ul>
-            {fonte.ferramentas.map((f) => (
+            {visiveis.map((f) => (
               <li key={f.nome}>
                 <div className="ferr-info">
                   <code>{f.nome}</code>
@@ -325,6 +348,7 @@ function CartaoFonte({ fonte, ehAdmin, aoAtualizar, aoApagar, aoEditar }: Cartao
               </li>
             ))}
           </ul>
+          </>
         )}
       </section>
 
