@@ -16,11 +16,16 @@ export interface Sessao {
 }
 
 // Link de acesso de uso único, válido por 15 minutos, para o telefone informado.
-export async function criarLinkDeLogin(db: Db, p: { workspaceId: number; telefone: string }, agora = new Date()): Promise<string> {
+// O papel padrão é o menor: admin só quando quem chama garante que a pessoa é o mantenedor.
+export async function criarLinkDeLogin(
+  db: Db,
+  p: { workspaceId: number; telefone: string; papel?: 'admin' | 'head' },
+  agora = new Date(),
+): Promise<string> {
   const token = novoToken();
   await db.query(
-    'insert into login_links (workspace_id, telefone, token_hash, expira_em) values ($1, $2, $3, $4)',
-    [p.workspaceId, p.telefone, hash(token), new Date(agora.getTime() + VALIDADE_LINK_MS).toISOString()],
+    'insert into login_links (workspace_id, telefone, token_hash, expira_em, papel) values ($1, $2, $3, $4, $5)',
+    [p.workspaceId, p.telefone, hash(token), new Date(agora.getTime() + VALIDADE_LINK_MS).toISOString(), p.papel ?? 'head'],
   );
   return token;
 }
@@ -31,11 +36,11 @@ export async function consumirLink(db: Db, token: string, agora = new Date()): P
   const link = await db.query(
     `update login_links set usado_em = $2
      where token_hash = $1 and usado_em is null and expira_em > $2
-     returning workspace_id, telefone`,
+     returning workspace_id, telefone, papel`,
     [hash(token), agora.toISOString()],
   );
   if (link.rows.length === 0) return null;
-  const { workspace_id: workspaceId, telefone } = link.rows[0];
+  const { workspace_id: workspaceId, telefone, papel } = link.rows[0];
 
   let usuario = await db.query('select id from usuarios where telefone = $1', [telefone]);
   if (usuario.rows.length === 0) {
@@ -44,11 +49,12 @@ export async function consumirLink(db: Db, token: string, agora = new Date()): P
   }
   const usuarioId = usuario.rows[0].id as number;
 
-  // Quem recebe o link já foi reconhecido como autorizado pela Poli: entra como administrador do tenant.
+  // O papel é o que valia quando o link foi pedido (a Poli já reconheceu a pessoa como autorizada), e é
+  // refeito a cada login: quem deixou de ser administrador não continua sendo.
   await db.query(
-    `insert into usuario_workspaces (usuario_id, workspace_id, papel) values ($1, $2, 'admin')
-     on conflict (usuario_id, workspace_id) do update set papel = 'admin'`,
-    [usuarioId, workspaceId],
+    `insert into usuario_workspaces (usuario_id, workspace_id, papel) values ($1, $2, $3)
+     on conflict (usuario_id, workspace_id) do update set papel = excluded.papel`,
+    [usuarioId, workspaceId, papel],
   );
 
   const sessao = novoToken();

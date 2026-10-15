@@ -217,6 +217,14 @@ export function painelRouter(deps: DepsApi): Router {
     }
   });
 
+  const hostDe = (url: unknown): string | null => {
+    try {
+      return typeof url === 'string' ? new URL(url).hostname.toLowerCase() : null;
+    } catch {
+      return null;
+    }
+  };
+
   r.patch('/fontes/:id', exigir(true), async (req, res) => {
     const p = esquemaFontePatch.safeParse(req.body);
     if (!p.success) {
@@ -251,6 +259,8 @@ export function painelRouter(deps: DepsApi): Router {
     if (p.data.quandoUsar !== undefined) campo('quando_usar', p.data.quandoUsar);
     if (p.data.ativa !== undefined) campo('ativa', p.data.ativa);
     if (p.data.segredo !== undefined) campo('segredo_enc', p.data.segredo === '' ? null : cifrar(p.data.segredo, deps.chaveCripto!));
+    // Trocou de servidor sem informar token novo: o token antigo era do servidor antigo e não pode ir para o novo.
+    else if (p.data.url !== undefined && hostDe(p.data.url) !== hostDe(atual.rows[0].config?.url)) campo('segredo_enc', null);
     // Mudou o endereço ou a credencial: o último teste não vale mais.
     if (p.data.url !== undefined || p.data.segredo !== undefined) sets.push(`status = 'nunca_testada'`);
     try {

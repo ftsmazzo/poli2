@@ -16,6 +16,7 @@ import { indexarJanelas } from './busca/janelas';
 import { responderPedido } from './agente/turno';
 import { enviarDocumento, enviarTexto } from './evolution/client';
 import { ehPedidoDeMd, entregarMdDoDia } from './agente/md';
+import { cabecalhosDeSeguranca, limitarTentativas } from './seguranca';
 import type { MensagemNormalizada, MensagemPrivada } from './ingest/evolution';
 import type { Db } from './migrate';
 import { extrairItensPendentes } from './extrair/persistir';
@@ -27,6 +28,10 @@ import { webhookRouter } from './webhooks';
 
 const cfg = loadConfig();
 const app = express();
+app.disable('x-powered-by');
+// Atrás do proxy do EasyPanel: o endereço de quem chama vem do cabeçalho do proxy (necessário para o limite de tentativas).
+app.set('trust proxy', 1);
+app.use(cabecalhosDeSeguranca);
 
 let pool: Pool | undefined;
 let bancoPronto = false;
@@ -126,6 +131,8 @@ const bancoDoPainel: Db = {
     return pool.query(sql, params as unknown[]);
   },
 };
+// O login por link é a única porta pública do painel: limita as tentativas por endereço.
+app.use('/api/entrar', limitarTentativas({ janelaMs: 5 * 60_000, max: 20 }));
 app.use('/api', painelRouter({ db: bancoDoPainel, conectar: conectorReal, chaveCripto: cfg.chaveCripto, cookieSeguro: cfg.appUrl.startsWith('https://') }));
 
 // Painel (React): arquivos estáticos e a página inicial para qualquer endereço que não seja da API.

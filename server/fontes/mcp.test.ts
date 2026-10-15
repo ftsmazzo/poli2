@@ -7,7 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite/vector';
 import { migrate } from '../migrate';
 import { cifrar } from '../painel/cripto';
-import { adaptar, cabecalhosDaFonte, ferramentasMcp, pareceLeitura, testarFonte, urlValida, type ConectorMcp } from './mcp';
+import { adaptar, cabecalhosDaFonte, descreverErro, destinoPublico, ferramentasMcp, ipPrivado, pareceLeitura, testarFonte, urlValida, type ConectorMcp } from './mcp';
 
 const CHAVE = 'chave-de-teste-com-mais-de-16';
 
@@ -55,12 +55,79 @@ describe('pareceLeitura e urlValida', () => {
     for (const n of ['apagar_dados', 'delete_row', 'enviar_mensagem', 'create_user', 'processar_lote', 'update_get']) expect(pareceLeitura(n)).toBe(false);
   });
 
-  it('aceita http(s) e recusa o resto e o endereço de metadados da nuvem', () => {
+  it('aceita só https de servidor público', () => {
     expect(urlValida('https://mcp.exemplo.com/mcp')).toBe(true);
-    expect(urlValida('http://poli2_mcp:3000/mcp')).toBe(true);
+    expect(urlValida('https://mcp.exemplo.com:8443/mcp?versao=2')).toBe(true);
+    expect(urlValida('https://8.8.8.8/mcp')).toBe(true);
     expect(urlValida('ftp://x.com')).toBe(false);
-    expect(urlValida('http://169.254.169.254/latest')).toBe(false);
+    expect(urlValida('http://mcp.exemplo.com/mcp')).toBe(false);
     expect(urlValida('não é url')).toBe(false);
+  });
+
+  it('recusa a rede interna: IP privado, loopback, metadados da nuvem, nome sem ponto e ".internal"', () => {
+    for (const u of [
+      'https://169.254.169.254/latest',
+      'https://127.0.0.1/mcp',
+      'https://10.1.2.3/mcp',
+      'https://172.16.0.9/mcp',
+      'https://192.168.0.10/mcp',
+      'https://0.0.0.0/mcp',
+      'https://[::1]/mcp',
+      'https://[::ffff:a9fe:a9fe]/mcp',
+      'https://2130706433/mcp', // 127.0.0.1 escrito como número
+      'https://localhost/mcp',
+      'https://poli2_mcp/mcp',
+      'https://metadata.google.internal/mcp',
+      'https://servidor.local/mcp',
+    ]) {
+      expect([u, urlValida(u)]).toEqual([u, false]);
+    }
+  });
+
+  it('recusa senha ou token escritos no endereço (o token tem campo próprio)', () => {
+    expect(urlValida('https://user:senha@mcp.exemplo.com/mcp')).toBe(false);
+    expect(urlValida('https://mcp.exemplo.com/mcp?token=abc')).toBe(false);
+    expect(urlValida('https://mcp.exemplo.com/mcp?api_key=abc')).toBe(false);
+    expect(urlValida('https://mcp.exemplo.com/mcp?Authorization=abc')).toBe(false);
+  });
+});
+
+describe('ipPrivado', () => {
+  it('reconhece endereços que não são da internet pública, inclusive IPv6 e IPv4 embutido', () => {
+    for (const ip of ['10.0.0.1', '127.0.0.1', '169.254.169.254', '172.31.255.255', '192.168.1.1', '100.64.0.1', '0.0.0.0', '224.0.0.1', '::1', '::', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1', '::ffff:a9fe:a9fe']) {
+      expect([ip, ipPrivado(ip)]).toEqual([ip, true]);
+    }
+    for (const ip of ['8.8.8.8', '1.1.1.1', '172.32.0.1', '172.15.0.1', '2606:4700:4700::1111', '::ffff:8.8.8.8']) {
+      expect([ip, ipPrivado(ip)]).toEqual([ip, false]);
+    }
+  });
+});
+
+describe('destinoPublico', () => {
+  it('IP público passa; nome que resolve para a rede interna é barrado', async () => {
+    await expect(destinoPublico('https://8.8.8.8/mcp')).resolves.toBeUndefined();
+    // "localhost" resolve para 127.0.0.1 em qualquer máquina: prova que o nome é conferido pelo IP, não só pelo texto.
+    await expect(destinoPublico('https://localhost/mcp')).rejects.toThrow(/rede interna/);
+  });
+});
+
+describe('descreverErro', () => {
+  it('devolve categorias claras e nunca o texto cru do servidor', () => {
+    expect(descreverErro(new Error('connect ECONNREFUSED 10.0.0.5:80'))).toBe('Não consegui conectar ao servidor da Fonte.');
+    expect(descreverErro(new Error('getaddrinfo ENOTFOUND x.exemplo.com'))).toBe('Não achei esse servidor: confira o endereço.');
+    expect(descreverErro(new Error('Streamable HTTP error: Error POSTing to endpoint (HTTP 401): {"segredo":"abc"}'))).toBe('A Fonte recusou o acesso: confira o token e o nome do cabeçalho.');
+    expect(descreverErro(new Error('Error POSTing (HTTP 502): <html>corpo interno</html>'))).toBe('O servidor da Fonte respondeu com erro interno (5xx).');
+    expect(descreverErro(new Error('qualquer coisa estranha com dados internos'))).toBe('Falha ao conectar com a Fonte.');
+    expect(descreverErro('não é erro')).toBe('Falha ao conectar com a Fonte.');
+    for (const e of [new Error('Error (HTTP 401): {"segredo":"abc"}'), new Error('(HTTP 502): corpo interno')]) {
+      expect(descreverErro(e)).not.toMatch(/segredo|abc|corpo interno/);
+    }
+  });
+
+  it('mantém as mensagens próprias, que explicam o motivo sem expor nada', () => {
+    expect(descreverErro(new Error('Destino não permitido: o endereço da Fonte aponta para a rede interna'))).toMatch(/rede interna/);
+    expect(descreverErro(new Error('A Fonte respondeu com redirecionamento (HTTP 302), que não é permitido'))).toMatch(/redirecionamento/);
+    expect(descreverErro(new Error('A conexão demorou mais de 20 s'))).toMatch(/demorou/);
   });
 });
 
@@ -147,9 +214,10 @@ describe('Fontes MCP', () => {
     it('se não conectar, registra o erro e a Fonte fica fora do ar', async () => {
       const id = await fonte(1, 'Fora do ar', { status: 'ok' });
       const r = await testarFonte(db, async () => { throw new Error('connect ECONNREFUSED'); }, CHAVE, 1, id);
-      expect(r).toMatchObject({ ok: false, erro: 'connect ECONNREFUSED' });
+      const erro = 'Não consegui conectar ao servidor da Fonte.';
+      expect(r).toMatchObject({ ok: false, erro });
       const f = await db.query<{ status: string; ultimo_erro: string }>('select status, ultimo_erro from fontes');
-      expect(f.rows[0]).toEqual({ status: 'erro', ultimo_erro: 'connect ECONNREFUSED' });
+      expect(f.rows[0]).toEqual({ status: 'erro', ultimo_erro: erro });
     });
 
     it('recusa endereço inválido sem tentar conectar, e não testa Fonte de outro tenant', async () => {

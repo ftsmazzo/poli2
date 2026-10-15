@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite/vector';
 import { migrate } from '../migrate';
-import { consumirLink } from '../painel/auth';
+import { carregarSessao, consumirLink } from '../painel/auth';
 import { entregarLinkDoPainel, ehPedidoDePainel } from './painel';
 import type { Pedido } from './pedido';
 
@@ -31,7 +31,7 @@ describe('entregarLinkDoPainel', () => {
     autorNome: 'Dono',
     consulta: 'painel',
     waMessageId: 'P1',
-    telefoneAutor: '5516996480805',
+    telefoneAutor: '5511912345678',
     ...extra,
   });
   const deps = (falharNo?: string) => ({
@@ -53,7 +53,7 @@ describe('entregarLinkDoPainel', () => {
 
   it('manda o link no privado de quem pediu e só avisa no grupo, sem o link', async () => {
     expect(await entregarLinkDoPainel(deps(), pedido())).toBe('enviado');
-    const privado = enviados.find((e) => e.destino === '5516996480805')!;
+    const privado = enviados.find((e) => e.destino === '5511912345678')!;
     const grupo = enviados.find((e) => e.destino === '1203@g.us')!;
     expect(privado.texto).toMatch(/^Seu acesso ao painel da Poli .*\nhttps:\/\/poli\.exemplo\.com\/entrar\?t=[A-Za-z0-9_-]{40,}$/s);
     expect(grupo.texto).toBe('Mandei o link do painel no seu privado.');
@@ -65,7 +65,7 @@ describe('entregarLinkDoPainel', () => {
     const token = /entrar\?t=([A-Za-z0-9_-]+)/.exec(enviados[0].texto)![1];
     expect(await consumirLink(db, token)).toBeTruthy();
     const u = await db.query<{ telefone: string }>('select telefone from usuarios');
-    expect(u.rows).toEqual([{ telefone: '5516996480805' }]);
+    expect(u.rows).toEqual([{ telefone: '5511912345678' }]);
   });
 
   it('o banco guarda só a marca do envio, nunca o endereço com o token', async () => {
@@ -76,12 +76,24 @@ describe('entregarLinkDoPainel', () => {
   });
 
   it('se o privado falhar, avisa no grupo sem o link e registra a falha', async () => {
-    expect(await entregarLinkDoPainel(deps('5516996480805'), pedido())).toBe('falhou');
+    expect(await entregarLinkDoPainel(deps('5511912345678'), pedido())).toBe('falhou');
     expect(enviados).toHaveLength(1);
     expect(enviados[0].destino).toBe('1203@g.us');
     expect(enviados[0].texto).not.toContain('entrar?t=');
     const s = await db.query<{ estado: string }>(`select estado from mensagens_saida where destino_tipo = 'privado'`);
     expect(s.rows).toEqual([{ estado: 'falhou' }]);
+  });
+
+  it('o papel do link acompanha quem pediu: administrador só o mantenedor; os demais entram como head', async () => {
+    await entregarLinkDoPainel(deps(), pedido({ papelNoPainel: 'admin' }));
+    await entregarLinkDoPainel(deps(), pedido({ papelNoPainel: 'head', waMessageId: 'P2' }));
+    await entregarLinkDoPainel(deps(), pedido({ waMessageId: 'P3' }));
+    const r = await db.query<{ papel: string }>('select papel from login_links order by id');
+    expect(r.rows.map((x) => x.papel)).toEqual(['admin', 'head', 'head']);
+
+    const token = /entrar\?t=([A-Za-z0-9_-]+)/.exec(enviados.find((e) => e.destino === '5511912345678')!.texto)![1];
+    const sessao = (await consumirLink(db, token))!;
+    expect((await carregarSessao(db, sessao))?.workspaces[0].papel).toBe('admin');
   });
 
   it('sem número do autor, não gera link', async () => {

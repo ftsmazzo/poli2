@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import express, { Router } from 'express';
+import express, { Router, type RequestHandler } from 'express';
 import type { Db } from './migrate';
 import { extrairMensagem, extrairPrivado, gravarMensagem, normalizarEvento, type MensagemNormalizada, type MensagemPrivada } from './ingest/evolution';
 
@@ -19,7 +19,8 @@ export type AoReceberPrivado = (instancia: string, dm: MensagemPrivada) => Promi
 export function webhookRouter(getDb: () => Db | undefined, token: string | undefined, aoGravar?: AoGravar, aoPrivado?: AoReceberPrivado): Router {
   const router = Router();
 
-  router.post('/evolution/:instancia', express.json({ limit: '15mb' }), async (req, res) => {
+  // A autenticação vem ANTES de ler o corpo (até 15 MB): quem não tem o token não faz o servidor processar nada.
+  const autenticar: RequestHandler = (req, res, next) => {
     // Sem token configurado o webhook fica fechado, nunca aberto.
     if (!token) {
       res.status(503).json({ erro: 'webhook_nao_configurado' });
@@ -29,6 +30,11 @@ export function webhookRouter(getDb: () => Db | undefined, token: string | undef
       res.status(401).json({ erro: 'nao_autorizado' });
       return;
     }
+    next();
+  };
+
+  router.post('/evolution/:instancia', autenticar, express.json({ limit: '15mb' }), async (req, res) => {
+    const instancia = String(req.params.instancia);
     const db = getDb();
     if (!db) {
       res.status(503).json({ erro: 'banco_indisponivel' });
@@ -47,7 +53,7 @@ export function webhookRouter(getDb: () => Db | undefined, token: string | undef
       for (const item of itens) {
         const dm = aoPrivado ? extrairPrivado(item) : null;
         if (dm && aoPrivado) {
-          void aoPrivado(req.params.instancia, dm).catch((err) =>
+          void aoPrivado(instancia, dm).catch((err) =>
             console.error('atendimento no privado falhou:', err instanceof Error ? err.message : err),
           );
           continue;
@@ -57,11 +63,11 @@ export function webhookRouter(getDb: () => Db | undefined, token: string | undef
           resumo.ignoradas++;
           continue;
         }
-        const r = await gravarMensagem(db, req.params.instancia, msg);
+        const r = await gravarMensagem(db, instancia, msg);
         if (r === 'gravada') {
           resumo.gravadas++;
           if (aoGravar) {
-            void aoGravar(req.params.instancia, msg).catch((err) =>
+            void aoGravar(instancia, msg).catch((err) =>
               console.error('processamento após a gravação falhou:', err instanceof Error ? err.message : err),
             );
           }
@@ -71,7 +77,7 @@ export function webhookRouter(getDb: () => Db | undefined, token: string | undef
       }
       // Só contagens: nunca o conteúdo da conversa. Deixa rastro de que as mensagens estão chegando.
       if (resumo.gravadas || resumo.instancia_desconhecida) {
-        console.log(`webhook ${req.params.instancia}: ${JSON.stringify(resumo)}`);
+        console.log(`webhook ${instancia}: ${JSON.stringify(resumo)}`);
       }
       res.json(resumo);
     } catch (err) {

@@ -38,7 +38,7 @@ export async function entregarLinkDoPainel(deps: DepsPainel, p: Pedido): Promise
   }
 
   try {
-    const token = await criarLinkDeLogin(db, { workspaceId: p.workspaceId, telefone: p.telefoneAutor });
+    const token = await criarLinkDeLogin(db, { workspaceId: p.workspaceId, telefone: p.telefoneAutor, papel: p.papelNoPainel ?? 'head' });
     const url = `${deps.urlBase.replace(/\/+$/, '')}/entrar?t=${token}`;
     await deps.enviar(p.instancia, p.telefoneAutor, `Seu acesso ao painel da Poli (vale 15 minutos e só funciona uma vez):\n${url}`);
     await registrar(p.telefoneAutor, 'privado', '[link de acesso ao painel]', 'enviada');

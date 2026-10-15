@@ -9,7 +9,7 @@ import { descobrirIdentificadores } from './lids';
 const EVO = { url: 'http://evolution:8080', apiKey: 'chave-de-teste' };
 const GRUPO = '120363000000000001@g.us';
 const POLI_TEL = '5596900000000@s.whatsapp.net';
-const DONO_TEL = '5516998480805';
+const DONO_TEL = '5511987654321';
 
 interface Estado {
   participantes: any[];

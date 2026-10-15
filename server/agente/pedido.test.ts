@@ -7,7 +7,7 @@ import { ativaPoli, avaliarPedido, avaliarPrivado,chaveNumero, ehComandante, nor
 
 const GRUPO = '120363000000000001@g.us';
 const POLI = '5596900000000@s.whatsapp.net';
-const DONO = '5516998480805@s.whatsapp.net';
+const DONO = '5511987654321@s.whatsapp.net';
 
 function msg(texto: string, extra: { participant?: string; participantAlt?: string; fromMe?: boolean; mencionados?: string[]; citadaAutor?: string; tipo?: 'texto' | 'imagem' } = {}): MensagemNormalizada {
   const contextInfo = {
@@ -39,12 +39,12 @@ describe('números', () => {
   });
 
   it('o mesmo número com e sem o nono dígito tem a mesma chave', () => {
-    expect(chaveNumero('5516998480805')).toBe(chaveNumero('551698480805'));
-    expect(chaveNumero('5516998480805')).not.toBe(chaveNumero('5516998480806'));
+    expect(chaveNumero('5511987654321')).toBe(chaveNumero('551187654321'));
+    expect(chaveNumero('5511987654321')).not.toBe(chaveNumero('5511987654322'));
   });
 
   it('normaliza a lista de comandantes e descarta o que não é número', () => {
-    expect(normalizarComandantes(['(16) 99848-0805', 'abc', '123', '5596999990000'])).toEqual(['5516998480805', '5596999990000']);
+    expect(normalizarComandantes(['(11) 98765-4321', 'abc', '123', '5596999990000'])).toEqual(['5511987654321', '5596999990000']);
     expect(normalizarComandantes([''])).toEqual([]);
   });
 });
@@ -93,11 +93,11 @@ describe('ativaPoli', () => {
 });
 
 describe('ehComandante', () => {
-  const dono = ['5516998480805'];
+  const dono = ['5511987654321'];
 
   it('autoriza pelo número do autor, com ou sem o nono dígito', () => {
     expect(ehComandante(msg('x'), dono)).toBe(true);
-    expect(ehComandante(msg('x', { participant: '551698480805@s.whatsapp.net' }), dono)).toBe(true);
+    expect(ehComandante(msg('x', { participant: '551187654321@s.whatsapp.net' }), dono)).toBe(true);
   });
 
   it('autoriza pelo número alternativo quando o autor vem como LID', () => {
@@ -113,7 +113,7 @@ describe('ehComandante', () => {
 
 describe('avaliarPedido', () => {
   let db: PGlite;
-  const dono = ['5516998480805'];
+  const dono = ['5511987654321'];
 
   beforeEach(async () => {
     db = new PGlite({ extensions: { vector } });
@@ -132,8 +132,8 @@ describe('avaliarPedido', () => {
   });
 
   it('devolve o telefone autorizado de quem pediu, completo, mesmo se o WhatsApp mandou sem o nono dígito', async () => {
-    const r = await avaliarPedido(db, 'inst-a', msg('Poli2 painel', { participant: '551698480805@s.whatsapp.net' }), dono);
-    expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5516998480805' } });
+    const r = await avaliarPedido(db, 'inst-a', msg('Poli2 painel', { participant: '551187654321@s.whatsapp.net' }), dono);
+    expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5511987654321' } });
   });
 
   it('autoriza quem foi marcado como "pode comandar" no painel, mesmo fora do ambiente', async () => {
@@ -155,10 +155,27 @@ describe('avaliarPedido', () => {
     expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5511999990000' } });
   });
 
+  describe('papel no painel', () => {
+    it('quem está na lista do servidor (o mantenedor) entra como admin; quem foi marcado só no painel, como head', async () => {
+      await db.query(`insert into pessoas (workspace_id, jid, nome, telefone, papel, pode_comandar) values (1, '5511999990000@s.whatsapp.net', 'Beltrano', '5511999990000', 'head', true)`);
+      const dono1 = await avaliarPedido(db, 'inst-a', msg('Poli2 painel'), dono);
+      expect(dono1).toMatchObject({ tipo: 'pedido', pedido: { papelNoPainel: 'admin' } });
+      const marcado = await avaliarPedido(db, 'inst-a', msg('Poli2 painel', { participant: '5511999990000@s.whatsapp.net' }), dono);
+      expect(marcado).toMatchObject({ tipo: 'pedido', pedido: { papelNoPainel: 'head' } });
+    });
+
+    it('o mesmo vale no privado', async () => {
+      await db.query(`insert into pessoas (workspace_id, jid, nome, telefone, papel, pode_comandar) values (1, '5511999990000@s.whatsapp.net', 'Beltrano', '5511999990000', 'head', true)`);
+      const dm = (contatoJid: string) => ({ waMessageId: 'DM9', contatoJid, contatoAlt: null, nome: 'X', texto: 'painel' });
+      expect(await avaliarPrivado(db, 'inst-a', dm('5511987654321@s.whatsapp.net'), dono)).toMatchObject({ pedido: { papelNoPainel: 'admin' } });
+      expect(await avaliarPrivado(db, 'inst-a', dm('5511999990000@s.whatsapp.net'), dono)).toMatchObject({ pedido: { papelNoPainel: 'head' } });
+    });
+  });
+
   describe('no privado', () => {
     const dm = (texto: string, extra: Partial<MensagemPrivada> = {}): MensagemPrivada => ({
       waMessageId: 'DM1',
-      contatoJid: '5516998480805@s.whatsapp.net',
+      contatoJid: '5511987654321@s.whatsapp.net',
       contatoAlt: null,
       nome: 'Dono',
       texto,
@@ -169,7 +186,7 @@ describe('avaliarPedido', () => {
       const r = await avaliarPrivado(db, 'inst-a', dm('qual o link do plano?'), dono);
       expect(r).toMatchObject({
         tipo: 'pedido',
-        pedido: { workspaceId: 1, grupoJid: '5516998480805@s.whatsapp.net', consulta: 'qual o link do plano?', privado: true, telefoneAutor: '5516998480805' },
+        pedido: { workspaceId: 1, grupoJid: '5511987654321@s.whatsapp.net', consulta: 'qual o link do plano?', privado: true, telefoneAutor: '5511987654321' },
       });
     });
 
@@ -179,9 +196,9 @@ describe('avaliarPedido', () => {
     });
 
     it('reconhece quem aparece como LID pelo par que a Poli aprendeu', async () => {
-      await db.query(`insert into lids (workspace_id, lid, telefone) values (1, '111111111111111', '5516998480805')`);
+      await db.query(`insert into lids (workspace_id, lid, telefone) values (1, '111111111111111', '5511987654321')`);
       const r = await avaliarPrivado(db, 'inst-a', dm('oi', { contatoJid: '111111111111111@lid' }), dono);
-      expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5516998480805' } });
+      expect(r).toMatchObject({ tipo: 'pedido', pedido: { telefoneAutor: '5511987654321' } });
     });
 
     it('recusa quem não tem permissão', async () => {

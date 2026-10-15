@@ -43,7 +43,7 @@ describe('alertas aos Heads', () => {
     await db.query(`insert into instancias_wa (workspace_id, evolution_instance) values (1, 'poli')`);
     await db.query(`insert into grupos (workspace_id, jid, nome, eh_heads) values (1, '1@g.us', 'Inteligência Eleitoral', false), (1, '2@g.us', 'Heads', true), (2, '3@g.us', 'Outro', true)`);
     await db.query(`insert into pessoas (workspace_id, nome, telefone, papel) values
-      (1, 'Chefe 1', '5516996480805', 'head'), (1, 'Chefe 2', '5596999990002', 'head'),
+      (1, 'Chefe 1', '5511912345678', 'head'), (1, 'Chefe 2', '5596999990002', 'head'),
       (1, 'Sem telefone', null, 'head'), (1, 'Equipe', '5596999990003', 'equipe'), (2, 'Do outro', '5511999990000', 'head')`);
   });
 
@@ -55,7 +55,7 @@ describe('alertas aos Heads', () => {
         'select destino_jid, destino_tipo, texto, estado from mensagens_saida order by id',
       );
       expect(s.rows.map((x) => [x.destino_jid, x.destino_tipo])).toEqual([
-        ['5516996480805', 'privado'],
+        ['5511912345678', 'privado'],
         ['5596999990002', 'privado'],
         ['2@g.us', 'grupo'],
       ]);
@@ -89,7 +89,7 @@ describe('alertas aos Heads', () => {
       const r = await enviarPendentes(db, enviar, MANHA);
       expect(r).toEqual({ enviadas: 3, falhas: 0, adiadas: 0 });
       expect(enviados.map((e) => e.instancia)).toEqual(['poli', 'poli', 'poli']);
-      expect(enviados[0].destino).toBe('5516996480805');
+      expect(enviados[0].destino).toBe('5511912345678');
       const a = await db.query<{ enviado_em: string | null }>('select enviado_em from alertas');
       expect(a.rows[0].enviado_em).not.toBeNull();
       expect((await enviarPendentes(db, enviar, MANHA)).enviadas).toBe(0);
@@ -110,13 +110,13 @@ describe('alertas aos Heads', () => {
     it('se o envio falhar tenta de novo e desiste na terceira, sem travar os outros', async () => {
       await prepararEnvios(db, await alerta());
       const falha5516 = async (i: string, destino: string, t: string) => {
-        if (destino === '5516996480805') throw new Error('Evolution POST respondeu 400');
+        if (destino === '5511912345678') throw new Error('Evolution POST respondeu 400');
         return enviar(i, destino, t);
       };
       expect(await enviarPendentes(db, falha5516, MANHA)).toEqual({ enviadas: 2, falhas: 1, adiadas: 0 });
       await enviarPendentes(db, falha5516, MANHA);
       await enviarPendentes(db, falha5516, MANHA);
-      const s = await db.query<{ estado: string; tentativas: number }>(`select estado, tentativas from mensagens_saida where destino_jid = '5516996480805'`);
+      const s = await db.query<{ estado: string; tentativas: number }>(`select estado, tentativas from mensagens_saida where destino_jid = '5511912345678'`);
       expect(s.rows).toEqual([{ estado: 'falhou', tentativas: 3 }]);
       expect((await enviarPendentes(db, falha5516, MANHA)).falhas).toBe(0);
     });

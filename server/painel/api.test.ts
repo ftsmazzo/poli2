@@ -11,7 +11,7 @@ import { painelRouter } from './api';
 import { decifrar } from './cripto';
 
 const CHAVE = 'chave-de-teste-com-mais-de-16';
-const TEL = '5516996480805';
+const TEL = '5511912345678';
 
 const clienteFalso = (): ClienteMcp => ({
   listarFerramentas: async () => [
@@ -56,7 +56,7 @@ describe('API do painel', () => {
 
   // Entra pelo link, como o navegador faz, e devolve o cookie.
   async function entrar(workspaceId: number, telefone = TEL): Promise<string> {
-    const token = await criarLinkDeLogin(db, { workspaceId, telefone });
+    const token = await criarLinkDeLogin(db, { workspaceId, telefone, papel: 'admin' });
     const r = await chamar('/entrar', { metodo: 'POST', corpo: { token } });
     expect(r.status).toBe(200);
     return r.cabecalhos.get('set-cookie')!.split(';')[0];
@@ -84,7 +84,7 @@ describe('API do painel', () => {
     });
 
     it('o link entra uma vez, o cookie é HttpOnly e a sessão enxerga o tenant', async () => {
-      const token = await criarLinkDeLogin(db, { workspaceId: 1, telefone: TEL });
+      const token = await criarLinkDeLogin(db, { workspaceId: 1, telefone: TEL, papel: 'admin' });
       const r = await chamar('/entrar', { metodo: 'POST', corpo: { token } });
       const cookie = r.cabecalhos.get('set-cookie')!;
       expect(cookie).toContain('HttpOnly');
@@ -191,15 +191,37 @@ describe('API do painel', () => {
       const cookie = await entrar(1);
       const { corpo: nova } = await chamar('/fontes', { metodo: 'POST', cookie, corpo: { nome: 'Urna', url: 'https://a.com/mcp' } });
       const t = await chamar(`/fontes/${nova.id}/testar`, { metodo: 'POST', cookie });
-      expect(t.corpo).toMatchObject({ ok: false, erro: 'connect ECONNREFUSED', fonte: { status: 'erro', ultimoErro: 'connect ECONNREFUSED' } });
+      // O erro vai em categoria, nunca com o texto cru do servidor.
+      const erro = 'Não consegui conectar ao servidor da Fonte.';
+      expect(t.corpo).toMatchObject({ ok: false, erro, fonte: { status: 'erro', ultimoErro: erro } });
+    });
+
+    it('recusa endereço da rede interna, sem https, com senha ou com token na URL', async () => {
+      const cookie = await entrar(1);
+      for (const url of ['http://a.com/mcp', 'https://localhost/mcp', 'https://10.0.0.5/mcp', 'https://169.254.169.254/latest', 'https://poli2_app/mcp', 'https://user:senha@a.com/mcp', 'https://a.com/mcp?token=abc']) {
+        const r = await chamar('/fontes', { metodo: 'POST', cookie, corpo: { nome: `F ${url}`.slice(0, 40), url } });
+        expect([url, r.corpo.erro]).toEqual([url, 'url_invalida']);
+      }
+      expect((await db.query<{ n: string }>('select count(*)::text as n from fontes')).rows[0].n).toBe('0');
+    });
+
+    it('trocar para outro servidor sem informar token novo apaga o token antigo; no mesmo servidor ele fica', async () => {
+      const cookie = await entrar(1);
+      const { corpo: nova } = await chamar('/fontes', { metodo: 'POST', cookie, corpo: { nome: 'Urna', url: 'https://a.com/mcp', segredo: 'tok' } });
+      const mesmoServidor = await chamar(`/fontes/${nova.id}`, { metodo: 'PATCH', cookie, corpo: { url: 'https://a.com/outro' } });
+      expect(mesmoServidor.corpo.temSegredo).toBe(true);
+      const outroServidor = await chamar(`/fontes/${nova.id}`, { metodo: 'PATCH', cookie, corpo: { url: 'https://b.com/mcp' } });
+      expect(outroServidor.corpo).toMatchObject({ url: 'https://b.com/mcp', temSegredo: false });
+      const comTokenNovo = await chamar(`/fontes/${nova.id}`, { metodo: 'PATCH', cookie, corpo: { url: 'https://c.com/mcp', segredo: 'novo' } });
+      expect(comTokenNovo.corpo.temSegredo).toBe(true);
     });
 
     it('trocar o endereço ou o segredo invalida o último teste; apagar o segredo funciona', async () => {
       const cookie = await entrar(1);
       const { corpo: nova } = await chamar('/fontes', { metodo: 'POST', cookie, corpo: { nome: 'Urna', url: 'https://a.com/mcp', segredo: 'tok' } });
       await chamar(`/fontes/${nova.id}/testar`, { metodo: 'POST', cookie });
-      const p = await chamar(`/fontes/${nova.id}`, { metodo: 'PATCH', cookie, corpo: { url: 'https://b.com/mcp' } });
-      expect(p.corpo).toMatchObject({ url: 'https://b.com/mcp', status: 'nunca_testada', temSegredo: true });
+      const p = await chamar(`/fontes/${nova.id}`, { metodo: 'PATCH', cookie, corpo: { url: 'https://a.com/v2/mcp' } });
+      expect(p.corpo).toMatchObject({ url: 'https://a.com/v2/mcp', status: 'nunca_testada', temSegredo: true });
       const q = await chamar(`/fontes/${nova.id}`, { metodo: 'PATCH', cookie, corpo: { segredo: '' } });
       expect(q.corpo.temSegredo).toBe(false);
       const r = await chamar(`/fontes/${nova.id}`, { metodo: 'PATCH', cookie, corpo: { nome: 'Urna TSE', ativa: false, quandoUsar: 'votos' } });
@@ -276,9 +298,9 @@ describe('API do painel', () => {
       const cookie = await entrar(1);
       await db.query(`insert into pessoas (workspace_id, nome, papel) values (1, 'Fulano', 'outro')`);
       const id = (await chamar('/pessoas', { cookie })).corpo[0].id;
-      const r = await chamar(`/pessoas/${id}`, { metodo: 'PATCH', cookie, corpo: { papel: 'head', podeComandar: true, telefone: '+55 (16) 99648-0805' } });
+      const r = await chamar(`/pessoas/${id}`, { metodo: 'PATCH', cookie, corpo: { papel: 'head', podeComandar: true, telefone: '+55 (11) 91234-5678' } });
       expect(r.status).toBe(200);
-      expect((await chamar('/pessoas', { cookie })).corpo[0]).toMatchObject({ papel: 'head', podeComandar: true, telefone: '5516996480805' });
+      expect((await chamar('/pessoas', { cookie })).corpo[0]).toMatchObject({ papel: 'head', podeComandar: true, telefone: '5511912345678' });
       expect((await chamar(`/pessoas/${id}`, { metodo: 'PATCH', cookie, corpo: { papel: 'chefao' } })).status).toBe(400);
     });
   });
@@ -316,7 +338,7 @@ describe('API do painel', () => {
       await db.query(`insert into grupos (workspace_id, jid, nome, acompanhar) values (1, '1@g.us', 'IE', true)`);
       await db.query(`insert into alertas (workspace_id, grupo_id, severidade, texto, dedupe_key) values (1, 1, 3, 'a', 'k1'), (1, 1, 2, 'b', 'k2')`);
       await db.query(`insert into mensagens_saida (workspace_id, destino_jid, destino_tipo, origem, alerta_id, texto, estado)
-        values (1, '5516996480805', 'privado', 'alerta', 1, 'x', 'pendente'), (1, '5596999990002', 'privado', 'alerta', 1, 'x', 'falhou')`);
+        values (1, '5511912345678', 'privado', 'alerta', 1, 'x', 'pendente'), (1, '5596999990002', 'privado', 'alerta', 1, 'x', 'falhou')`);
       const d = (await chamar('/diagnostico', { cookie })).corpo;
       // O alerta 2 não tem nenhuma mensagem de saída: ficou sem destino.
       expect(d.alertas).toEqual({ pendentesDeEnvio: 1, falhasDeEnvio: 1, semDestino: 1, gruposAcompanhados: 1 });

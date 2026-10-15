@@ -14,7 +14,7 @@ export function chaveNumero(digitos: string): string {
   return digitos;
 }
 
-// Aceita "5516998480805", "(16) 99848-0805" etc.; devolve só dígitos com DDI 55 e descarta o que não parece número.
+// Aceita "5511987654321", "(11) 98765-4321" etc.; devolve só dígitos com DDI 55 e descarta o que não parece número.
 export function normalizarComandantes(lista: string[]): string[] {
   return lista
     .map((n) => n.replace(/\D/g, ''))
@@ -32,6 +32,8 @@ export interface Pedido {
   waMessageId: string;
   // Telefone (só dígitos) de quem pediu, já conferido como autorizado: é para onde vai o link do painel.
   telefoneAutor: string | null;
+  // Papel que o link do painel dá a quem pediu: admin só para o mantenedor (lista COMANDANTES do servidor).
+  papelNoPainel?: 'admin' | 'head';
   // Pedido feito no privado: grupoJid é o contato, e a resposta volta para ele.
   privado?: boolean;
 }
@@ -60,7 +62,7 @@ function tamanhoDoNomeNoInicio(texto: string, nome: string | null): number {
   return prefixo + nome.length;
 }
 
-// "5516998480805" -> "5516*****0805": o dono reconhece o próprio número e o log não expõe o resto.
+// "5511987654321" -> "5511*****4321": o dono reconhece o próprio número e o log não expõe o resto.
 function mascarar(digitos: string): string {
   return digitos.length >= 9 ? `${digitos.slice(0, 4)}${'*'.repeat(digitos.length - 8)}${digitos.slice(-4)}` : '***';
 }
@@ -113,7 +115,7 @@ async function conferirAutor(
   autorJid: string | null,
   autorAlt: string | null,
   comandantes: string[],
-): Promise<{ telefone: string } | { negado: string }> {
+): Promise<{ telefone: string; doServidor: boolean } | { negado: string }> {
   // Autor que chega como LID: procura o telefone que a Poli já aprendeu para esse LID.
   const lids = [autorJid, autorAlt].filter((j): j is string => !!j && j.endsWith('@lid')).map(numeroDe);
   const conhecidos = lids.length
@@ -128,7 +130,11 @@ async function conferirAutor(
   const permitidos = [...comandantes, ...doPainel.rows.map((r) => r.fone as string | null).filter((f): f is string => !!f)].map(numeroDe).filter(Boolean);
   const autorizados = new Set(permitidos.map(chaveNumero));
   const candidato = [autorAlt, autorJid, ...conhecidos].map(numeroDe).find((d) => d !== '' && autorizados.has(chaveNumero(d)));
-  if (candidato) return { telefone: permitidos.find((p) => chaveNumero(p) === chaveNumero(candidato)) ?? candidato };
+  if (candidato) {
+    // "doServidor": o número está na lista COMANDANTES do servidor (o mantenedor). Quem só foi marcado no painel não.
+    const doServidor = comandantes.map(numeroDe).filter(Boolean).some((c) => chaveNumero(c) === chaveNumero(candidato));
+    return { telefone: permitidos.find((p) => chaveNumero(p) === chaveNumero(candidato)) ?? candidato, doServidor };
+  }
   // O telefone sai mascarado (começo e 4 últimos dígitos): dá para o dono reconhecer o próprio número.
   const telefones = [...new Set([autorAlt, ...conhecidos].filter((t): t is string => !!t).map(numeroDe).filter(Boolean))];
   return { negado: `autor: ${dominio(autorJid)}; alternativo: ${dominio(autorAlt)}; telefone do autor: ${telefones.map(mascarar).join(', ') || 'desconhecido'}` };
@@ -153,6 +159,7 @@ export async function avaliarPrivado(db: Db, instancia: string, dm: MensagemPriv
       consulta: consulta || 'oi',
       waMessageId: dm.waMessageId,
       telefoneAutor: quem.telefone,
+      papelNoPainel: quem.doServidor ? 'admin' : 'head',
       privado: true,
     },
   };
@@ -185,6 +192,7 @@ export async function avaliarPedido(
   const quem = await conferirAutor(db, Number(inst.rows[0].workspace_id), msg.autorJid, msg.autorAlt, comandantes);
   if ('negado' in quem) return { tipo: 'nao_autorizado', detalhe: quem.negado };
   const telefoneAutor = quem.telefone;
+  const papelNoPainel = quem.doServidor ? ('admin' as const) : ('head' as const);
 
   const grupo = await db.query('select nome from grupos where workspace_id = $1 and jid = $2', [
     inst.rows[0].workspace_id,
@@ -201,6 +209,7 @@ export async function avaliarPedido(
       consulta: chamada.consulta || 'oi',
       waMessageId: msg.waMessageId,
       telefoneAutor,
+      papelNoPainel,
     },
   };
 }

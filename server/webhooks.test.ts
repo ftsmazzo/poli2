@@ -59,6 +59,17 @@ describe('webhook da Evolution', () => {
     expect(r.rows[0].n).toBe('0');
   });
 
+  it('confere o token antes de ler o corpo: sem token, nem um corpo quebrado ou enorme é processado', async () => {
+    await subir(TOKEN);
+    const bruto = (corpoTexto: string, headers: Record<string, string> = {}) =>
+      fetch(base, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: corpoTexto });
+    // JSON inválido sem token: 401 (antes da correção, o servidor tentava ler o corpo e respondia 400).
+    expect((await bruto('{isto não é json')).status).toBe(401);
+    expect((await bruto('x'.repeat(2_000_000), { 'x-webhook-token': 'errado' })).status).toBe(401);
+    // Com o token certo, o corpo passa a ser lido (e o JSON inválido é recusado como pedido ruim).
+    expect((await bruto('{isto não é json', { 'x-webhook-token': TOKEN })).status).toBe(400);
+  });
+
   it('fica fechado quando o token não está configurado', async () => {
     await subir(undefined);
     expect((await enviar(corpo(), { 'x-webhook-token': '' })).status).toBe(503);
@@ -100,11 +111,11 @@ describe('webhook da Evolution', () => {
     });
     const privada = {
       event: 'MESSAGES_UPSERT',
-      data: { key: { remoteJid: '5516998480805@s.whatsapp.net', fromMe: false, id: 'P1' }, pushName: 'Dono', message: { conversation: 'oi poli' }, messageTimestamp: 1790000000 },
+      data: { key: { remoteJid: '5511987654321@s.whatsapp.net', fromMe: false, id: 'P1' }, pushName: 'Dono', message: { conversation: 'oi poli' }, messageTimestamp: 1790000000 },
     };
     expect((await enviar(privada, { 'x-webhook-token': TOKEN })).status).toBe(200);
     await new Promise((ok) => setTimeout(ok, 20));
-    expect(recebidas).toEqual(['inst-a|5516998480805@s.whatsapp.net|oi poli']);
+    expect(recebidas).toEqual(['inst-a|5511987654321@s.whatsapp.net|oi poli']);
     expect((await db.query<{ n: string }>('select count(*)::text as n from mensagens')).rows[0].n).toBe('0');
     expect((await db.query<{ n: string }>('select count(*)::text as n from grupos')).rows[0].n).toBe('0');
   });
@@ -116,7 +127,7 @@ describe('webhook da Evolution', () => {
     });
     const dela = {
       event: 'MESSAGES_UPSERT',
-      data: { key: { remoteJid: '5516998480805@s.whatsapp.net', fromMe: true, id: 'P2' }, message: { conversation: 'resposta' }, messageTimestamp: 1790000000 },
+      data: { key: { remoteJid: '5511987654321@s.whatsapp.net', fromMe: true, id: 'P2' }, message: { conversation: 'resposta' }, messageTimestamp: 1790000000 },
     };
     await enviar(dela, { 'x-webhook-token': TOKEN });
     await new Promise((ok) => setTimeout(ok, 20));

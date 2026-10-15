@@ -1,3 +1,4 @@
+import { lookup } from 'node:dns/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -34,14 +35,71 @@ export function pareceLeitura(nome: string, anotacoes?: { readOnlyHint?: boolean
   return NOME_DE_LEITURA.test(nome) && !NOME_DE_ESCRITA.test(nome);
 }
 
-// Endereço de Fonte: só http(s), e nunca o endereço de metadados da nuvem (169.254.x.x).
+// Endereços que não são da internet pública: rede interna, loopback, metadados da nuvem (169.254.x.x) etc.
+export function ipPrivado(ip: string): boolean {
+  const v = ip.toLowerCase();
+  const mapeadoHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v);
+  if (mapeadoHex) {
+    const n = (parseInt(mapeadoHex[1], 16) << 16) | parseInt(mapeadoHex[2], 16);
+    return ipPrivado(`${(n >>> 24) & 255}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`);
+  }
+  const mapeado = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v);
+  if (mapeado) return ipPrivado(mapeado[1]);
+  if (v.includes(':')) return v === '::' || v === '::1' || /^f[cd]/.test(v) || /^fe[89ab]/.test(v);
+  const p = v.split('.').map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = p;
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+}
+
+const CREDENCIAL_NA_URL = /^(token|key|api[_-]?key|apikey|access[_-]?token|auth|authorization|secret|password|senha|pwd)$/i;
+
+// Endereço de Fonte: só https, com nome de servidor público. Não aceita IP da rede interna, nome sem ponto
+// (serviço do próprio servidor), ".internal"/".local", nem senha ou token escrito no endereço (o token tem campo próprio).
 export function urlValida(url: string): boolean {
   try {
     const u = new URL(url);
-    return (u.protocol === 'https:' || u.protocol === 'http:') && !/^169\.254\./.test(u.hostname);
+    if (u.protocol !== 'https:') return false;
+    if (u.username || u.password) return false;
+    for (const k of u.searchParams.keys()) if (CREDENCIAL_NA_URL.test(k)) return false;
+    const host = u.hostname.toLowerCase();
+    if (host.startsWith('[')) return false;
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return !ipPrivado(host);
+    return host.includes('.') && !/\.(internal|local|localhost|lan|home|corp|intranet)$/.test(host);
   } catch {
     return false;
   }
+}
+
+// O nome pode ser público e apontar para um IP interno: confere para onde ele resolve antes de conectar.
+export async function destinoPublico(url: string): Promise<void> {
+  const host = new URL(url).hostname;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return;
+  const enderecos = await lookup(host, { all: true });
+  if (enderecos.length === 0 || enderecos.some((e) => ipPrivado(e.address))) {
+    throw new Error('Destino não permitido: o endereço da Fonte aponta para a rede interna');
+  }
+}
+
+// Redirecionamento é o jeito clássico de contornar a checagem acima (o servidor externo manda ir para um IP interno).
+const semRedirecionar: typeof fetch = async (input, init) => {
+  const res = await fetch(input, { ...init, redirect: 'manual' });
+  if (res.status >= 300 && res.status < 400) throw new Error(`A Fonte respondeu com redirecionamento (HTTP ${res.status}), que não é permitido`);
+  return res;
+};
+
+// O erro vai para o painel: em categorias, nunca com o corpo da resposta do servidor (pode ser dado de outro sistema).
+export function descreverErro(err: unknown): string {
+  const m = err instanceof Error ? err.message : '';
+  // Mensagens nossas (explicam o motivo e não trazem nada do servidor da Fonte).
+  if (/Endereço da Fonte inválido|Destino não permitido|redirecionamento|demorou mais de|ENCRYPTION_KEY/.test(m)) return m.split('\n')[0].slice(0, 200);
+  if (/\b(401|403)\b|unauthorized|forbidden/i.test(m)) return 'A Fonte recusou o acesso: confira o token e o nome do cabeçalho.';
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(m)) return 'Não achei esse servidor: confira o endereço.';
+  if (/ECONNREFUSED|ECONNRESET|ETIMEDOUT|fetch failed/i.test(m)) return 'Não consegui conectar ao servidor da Fonte.';
+  if (/certificate|CERT_|SSL|TLS/i.test(m)) return 'Problema com o certificado HTTPS do servidor da Fonte.';
+  if (/\b(404|405)\b/.test(m)) return 'O servidor respondeu, mas esse endereço não parece ser um MCP (erro 404).';
+  if (/\b5\d\d\b/.test(m)) return 'O servidor da Fonte respondeu com erro interno (5xx).';
+  return 'Falha ao conectar com a Fonte.';
 }
 
 // ---------- Conexão ----------
@@ -96,7 +154,9 @@ export function adaptar(client: Client): ClienteMcp {
 
 // Tenta o transporte atual (Streamable HTTP) e, se o servidor for antigo, o SSE.
 export const conectorReal: ConectorMcp = async ({ url, headers }) => {
-  const opcoes = { requestInit: { headers } };
+  if (!urlValida(url)) throw new Error('Endereço da Fonte inválido');
+  await destinoPublico(url);
+  const opcoes = { requestInit: { headers }, fetch: semRedirecionar };
   const novo = () => new Client({ name: 'poli2', version: '0.1.0' });
   try {
     const c = novo();
@@ -164,7 +224,7 @@ export async function testarFonte(db: Db, conectar: ConectorMcp, chave: string, 
     return { ok: true, latenciaMs, ferramentas: ferramentas.length };
   } catch (err) {
     const latenciaMs = Date.now() - inicio;
-    const erro = (err instanceof Error ? err.message : 'Falha ao conectar').slice(0, 300);
+    const erro = descreverErro(err);
     await db.query(`update fontes set status = 'erro', ultimo_teste_em = now(), ultimo_erro = $2, latencia_ms = $3 where id = $1`, [fonteId, erro, latenciaMs]);
     return { ok: false, latenciaMs, ferramentas: 0, erro };
   } finally {

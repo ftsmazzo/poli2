@@ -167,8 +167,8 @@ describe('MD do dia', () => {
     it('no privado, registra como privado e responde para o próprio contato', async () => {
       await msg(1, 1, 'conversa de hoje', '2026-10-15T10:00:00-03:00');
       const { deps, docs } = montar();
-      await entregarMdDoDia(deps, { ...pedido, grupoJid: '5516998480805@s.whatsapp.net', privado: true }, 'hoje');
-      expect(docs[0].destino).toBe('5516998480805@s.whatsapp.net');
+      await entregarMdDoDia(deps, { ...pedido, grupoJid: '5511987654321@s.whatsapp.net', privado: true }, 'hoje');
+      expect(docs[0].destino).toBe('5511987654321@s.whatsapp.net');
       const s = await db.query<{ destino_tipo: string }>('select destino_tipo from mensagens_saida');
       expect(s.rows[0].destino_tipo).toBe('privado');
     });

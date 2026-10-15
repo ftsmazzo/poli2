@@ -116,7 +116,9 @@ export interface Diagnostico {
 // ---------- Erros ----------
 
 const MENSAGENS: Record<string, string> = {
-  url_invalida: 'O endereço (URL) informado não é válido. Use um endereço https:// completo.',
+  url_invalida:
+    'O endereço (URL) informado não é aceito. Use um endereço https:// completo de um servidor público: não vale endereço interno (localhost, IP de rede, nome sem ponto), nem senha ou token escritos na URL (o token tem campo próprio).',
+  muitas_tentativas: 'Muitas tentativas seguidas. Espere alguns minutos e peça um link novo no WhatsApp.',
   nome_ja_existe: 'Já existe uma Fonte com esse nome neste workspace.',
   dados_invalidos: 'Algum dado informado não é válido. Confira os campos e tente de novo.',
   sem_chave_de_criptografia:
