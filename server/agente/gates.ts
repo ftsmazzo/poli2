@@ -12,14 +12,14 @@ function numerosGrandes(texto: string): string[] {
 
 // Trava aplicada DEPOIS do modelo. O que a Poli manda não pode conter link, telefone nem cifra grande que não
 // esteja no que as buscas devolveram: o modelo pode errar um dígito, arredondar ou inventar; o código não deixa passar.
-export function aplicarGates(resposta: string, evidencia: string): string {
+export function filtrarLinhas(resposta: string, evidencia: string): string {
   const chavesLinks = new Set(extrairLinks(evidencia).map((i) => i.chave));
   const chavesTelefones = new Set(extrairTelefones(evidencia).map((i) => i.chave));
   const numerosDaEvidencia = numerosGrandes(evidencia);
   // Vale o número inteiro ou um pedaço dele (o telefone "99123-4567" aparece na evidência como "+5596991234567").
   const naEvidencia = (n: string) => numerosDaEvidencia.some((e) => e === n || e.includes(n));
 
-  const linhasBoas = resposta
+  return resposta
     .replace(/\s*[—–]\s*/g, ' - ')
     .split('\n')
     .filter((linha) => {
@@ -27,9 +27,12 @@ export function aplicarGates(resposta: string, evidencia: string): string {
       const fonesOk = extrairTelefones(linha).every((i) => chavesTelefones.has(i.chave));
       const numerosOk = numerosGrandes(linha).every(naEvidencia);
       return linksOk && fonesOk && numerosOk;
-    });
+    })
+    .join('\n');
+}
 
-  let texto = linhasBoas.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+export function aplicarGates(resposta: string, evidencia: string): string {
+  let texto = filtrarLinhas(resposta, evidencia).replace(/\n{3,}/g, '\n\n').trim();
   if (!texto) return SEM_RESULTADO;
 
   if (texto.length > LIMITE_CARACTERES) {

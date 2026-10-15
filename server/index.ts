@@ -14,7 +14,8 @@ import { avaliarPedido, avaliarPrivado, type Avaliacao } from './agente/pedido';
 import { criarEmbedderOpenRouter } from './busca/embeddings';
 import { indexarJanelas } from './busca/janelas';
 import { responderPedido } from './agente/turno';
-import { enviarTexto } from './evolution/client';
+import { enviarDocumento, enviarTexto } from './evolution/client';
+import { ehPedidoDeMd, entregarMdDoDia } from './agente/md';
 import type { MensagemNormalizada, MensagemPrivada } from './ingest/evolution';
 import type { Db } from './migrate';
 import { extrairItensPendentes } from './extrair/persistir';
@@ -80,6 +81,24 @@ async function atender(db: Db, avaliacao: Avaliacao, texto: string | null): Prom
   // "painel": o link de acesso vai para o PRIVADO de quem pediu; o grupo só recebe o aviso.
   if (ehPedidoDePainel(avaliacao.pedido.consulta)) {
     console.log(`painel: link ${await entregarLinkDoPainel({ db, enviar, urlBase: cfg.appUrl }, avaliacao.pedido)}`);
+    return;
+  }
+
+  // "gera o MD de hoje": resumo do dia de cada grupo em um arquivo Markdown.
+  const md = ehPedidoDeMd(avaliacao.pedido.consulta);
+  if (md) {
+    const resultado = await entregarMdDoDia(
+      {
+        db,
+        chat: criarChatOpenRouter(cfg.openrouterKey),
+        modelo: cfg.modeloRedatora,
+        enviarTexto: enviar,
+        enviarDocumento: (inst, destino, doc) => enviarDocumento(evo, inst, destino, doc),
+      },
+      avaliacao.pedido,
+      md.quando,
+    );
+    console.log(`md do dia: ${resultado}`);
     return;
   }
 

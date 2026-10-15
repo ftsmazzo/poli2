@@ -144,6 +144,34 @@ export async function enviarTexto(
   return { waMessageId: typeof r?.key?.id === 'string' ? r.key.id : null };
 }
 
+// Envia um arquivo (documento) para um grupo ou pessoa: o conteúdo vai em base64 no corpo do pedido.
+export async function enviarDocumento(
+  cfg: EvolutionCfg,
+  instancia: string,
+  destino: string,
+  doc: { nomeArquivo: string; conteudo: string; mime: string; legenda?: string },
+  f: Fetcher = fetch,
+): Promise<{ waMessageId: string | null }> {
+  const r = await chamar(
+    cfg,
+    f,
+    `/message/sendMedia/${encodeURIComponent(instancia)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        number: destino,
+        mediatype: 'document',
+        mimetype: doc.mime,
+        fileName: doc.nomeArquivo,
+        caption: doc.legenda ?? '',
+        media: Buffer.from(doc.conteudo, 'utf8').toString('base64'),
+      }),
+    },
+    60_000,
+  );
+  return { waMessageId: typeof r?.key?.id === 'string' ? r.key.id : null };
+}
+
 export interface MidiaBaixada {
   dados: Buffer;
   mime: string | null;
